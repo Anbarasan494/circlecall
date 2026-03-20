@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CircleCall — Free Video Meetings</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="home">
+
+  <div class="home-bg">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <div class="home-card">
+    <div class="logo">
+      <div class="logo-mark">
+        <span class="logo-ring"></span>
+        <span class="logo-dot"></span>
+      </div>
+      <h1>CircleCall</h1>
+    </div>
+    <p class="tagline">Crystal-clear video meetings,<br><em>no fuss, no sign-up.</em></p>
+
+    <button class="btn-primary" onclick="createMeeting()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New Meeting
+    </button>
+
+    <div class="divider"><span>or join with a code</span></div>
+
+    <div class="join-row">
+      <input id="meetingId" placeholder="e.g. abc123" autocomplete="off" spellcheck="false" />
+      <button class="btn-join" onclick="joinMeeting()">Join</button>
+    </div>
+
+    <p class="hint" id="hint"></p>
+  </div>
+
+  <script>
+    function createMeeting() {
+      const id = Math.random().toString(36).substring(2, 8)
+      window.location.href = "/room/" + id
+    }
+
+    function joinMeeting() {
+      const id = document.getElementById("meetingId").value.trim()
+      if (!id) {
+        const hint = document.getElementById("hint")
+        hint.textContent = "Please enter a meeting code."
+        hint.classList.add("error")
+        return
+      }
+      window.location.href = "/room/" + id
+    }
+
+    document.getElementById("meetingId").addEventListener("keydown", e => {
+      if (e.key === "Enter") joinMeeting()
+    })
+
+    document.getElementById("meetingId").addEventListener("input", () => {
+      const hint = document.getElementById("hint")
+      hint.textContent = ""
+      hint.classList.remove("error")
+    })
+  </script>
+
+</body>
+</html>
