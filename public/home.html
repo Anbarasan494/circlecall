@@ -4,47 +4,70 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CircleCall — Free Video Meetings</title>
-
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=DM+Sans&display=swap" rel="stylesheet">
-
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
-
 <body class="home">
 
-  <div class="home-bg">
-    <div class="blob blob-1"></div>
-    <div class="blob blob-2"></div>
-    <div class="blob blob-3"></div>
+  <!-- Animated mesh background -->
+  <div class="mesh-bg">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <div class="orb orb-4"></div>
+    <div class="grid-lines"></div>
   </div>
 
-  <div class="home-card">
-    <div class="logo">
-      <div class="logo-mark">
-        <span class="logo-ring"></span>
-        <span class="logo-dot"></span>
+  <div class="home-wrap">
+
+    <!-- Logo -->
+    <div class="home-logo" style="animation-delay:0s">
+      <div class="logo-icon">
+        <span class="logo-ring-outer"></span>
+        <span class="logo-ring-inner"></span>
+        <span class="logo-core"></span>
       </div>
-      <h1>CircleCall</h1>
+      <span class="logo-wordmark">CircleCall</span>
     </div>
 
-    <p class="tagline">
-      Crystal-clear video meetings,<br><em>no fuss, no sign-up.</em>
+    <p class="home-tagline" style="animation-delay:0.1s">
+      Crystal-clear meetings.<br>
+      <em>Zero friction. Zero sign-up.</em>
     </p>
 
-    <button class="btn-primary" onclick="createMeeting()">
-      New Meeting
-    </button>
+    <!-- Card -->
+    <div class="home-card" style="animation-delay:0.2s">
 
-    <div class="divider"><span>or join with a code</span></div>
+      <button class="btn-new-meeting" onclick="createMeeting()">
+        <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Meeting
+        <span class="btn-shimmer"></span>
+      </button>
 
-    <div class="join-row">
-      <input id="meetingId" placeholder="e.g. abc123" autocomplete="off" />
-      <button class="btn-join" onclick="joinMeeting()">Join</button>
+      <div class="or-divider">
+        <span class="or-line"></span>
+        <span class="or-text">or join</span>
+        <span class="or-line"></span>
+      </div>
+
+      <div class="join-group">
+        <input id="meetingId"
+          class="join-input"
+          placeholder="Enter meeting code…"
+          autocomplete="off"
+          spellcheck="false" />
+        <button class="btn-join" onclick="joinMeeting()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+
+      <p class="home-hint" id="hint"></p>
     </div>
 
-    <p class="hint" id="hint"></p>
+    <p class="home-footer" style="animation-delay:0.35s">Free forever · No account needed · End-to-end WebRTC</p>
+
   </div>
 
   <script>
@@ -52,37 +75,24 @@
       const id = Math.random().toString(36).substring(2, 8)
       window.location.href = "/room/" + id
     }
-
     function joinMeeting() {
-      const input = document.getElementById("meetingId")
-      const id = input.value.trim()
-
+      const id = document.getElementById("meetingId").value.trim()
       if (!id) {
-        const hint = document.getElementById("hint")
-        hint.textContent = "Please enter a meeting code."
-        hint.classList.add("error")
-        input.focus()
+        const h = document.getElementById("hint")
+        h.textContent = "Please enter a meeting code."
+        h.classList.add("error")
         return
       }
-
       window.location.href = "/room/" + id
     }
-
-    // ✅ FIX: Run AFTER DOM loads
-    document.addEventListener("DOMContentLoaded", () => {
-      const input = document.getElementById("meetingId")
-      const hint = document.getElementById("hint")
-
-      input.addEventListener("keydown", e => {
-        if (e.key === "Enter") joinMeeting()
-      })
-
-      input.addEventListener("input", () => {
-        hint.textContent = ""
-        hint.classList.remove("error")
-      })
+    document.getElementById("meetingId").addEventListener("keydown", e => {
+      if (e.key === "Enter") joinMeeting()
+    })
+    document.getElementById("meetingId").addEventListener("input", () => {
+      const h = document.getElementById("hint")
+      h.textContent = ""
+      h.classList.remove("error")
     })
   </script>
-
 </body>
 </html>
