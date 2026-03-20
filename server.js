@@ -1,23 +1,28 @@
-// ________________________________________________________________________________
-//  CircleCall — SERVER (FULL FIXED VERSION)
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+//  CircleCall — SERVER (RENDER READY)
+// ─────────────────────────────────────────────────────────
+
 const express = require("express")
-const app     = express()
-const server  = require("http").createServer(app)
+const app = express()
+const server = require("http").createServer(app)
 
 const io = require("socket.io")(server, {
   pingTimeout: 60000,
-  pingInterval: 25000
+  pingInterval: 25000,
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
 })
 
 const path = require("path")
-const { ExpressPeerServer } = require("peer")
+const { ExpressPeerServer } = require("peerjs")
 
-// ── PeerJS server ─────────────────────────────────────────────────────────────
+// PeerJS server
 app.use("/peerjs", ExpressPeerServer(server, { debug: true }))
 
-// ── Static files ──────────────────────────────────────────────────────────────
-app.use(express.static("public", { maxAge: 0 }))
+// Static files
+app.use(express.static("public"))
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public/home.html"))
@@ -27,23 +32,9 @@ app.get("/room/:room", (req, res) => {
   res.sendFile(path.join(__dirname, "public/room.html"))
 })
 
-// ── Room structure ────────────────────────────────────────────────────────────
-/*
-rooms = {
-  roomId: {
-    host: peerId,
-    members: {
-      peerId: { socketId, username, micOn, camOn }
-    },
-    waiting: {
-      peerId: { socketId, username }
-    }
-  }
-}
-*/
+// Rooms
 const rooms = {}
 
-// ── Helper: broadcast participants ────────────────────────────────────────────
 function broadcastParticipants(roomId) {
   if (!rooms[roomId]) return
 
@@ -57,12 +48,8 @@ function broadcastParticipants(roomId) {
   io.to(roomId).emit("participants-update", list, rooms[roomId].host)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  SOCKET CONNECTION
-// ─────────────────────────────────────────────────────────────────────────────
 io.on("connection", socket => {
 
-  // ── JOIN ROOM ───────────────────────────────────────────────────────────────
   socket.on("join-room", (roomId, userId, username) => {
 
     if (!rooms[roomId]) {
@@ -76,9 +63,7 @@ io.on("connection", socket => {
     socket.userId = userId
     socket.roomId = roomId
 
-    // ── HOST ──────────────────────────────────────────────────────────────────
     if (rooms[roomId].host === userId) {
-
       rooms[roomId].members[userId] = {
         socketId: socket.id,
         username,
@@ -87,14 +72,9 @@ io.on("connection", socket => {
       }
 
       socket.join(roomId)
-
       socket.emit("existing-users", [], true, userId)
-
       broadcastParticipants(roomId)
-    }
-
-    // ── NON-HOST → WAITING ROOM ────────────────────────────────────────────────
-    else {
+    } else {
       rooms[roomId].waiting[userId] = {
         socketId: socket.id,
         username
@@ -109,10 +89,8 @@ io.on("connection", socket => {
     }
   })
 
-  // ── APPROVE USER ────────────────────────────────────────────────────────────
   socket.on("approve-user", targetId => {
     const { roomId, userId } = socket
-
     if (!rooms[roomId] || rooms[roomId].host !== userId) return
 
     const target = rooms[roomId].waiting[targetId]
@@ -121,23 +99,8 @@ io.on("connection", socket => {
     io.to(target.socketId).emit("approved")
   })
 
-  // ── DENY USER ───────────────────────────────────────────────────────────────
-  socket.on("deny-user", targetId => {
-    const { roomId, userId } = socket
-
-    if (!rooms[roomId] || rooms[roomId].host !== userId) return
-
-    const target = rooms[roomId].waiting[targetId]
-    if (!target) return
-
-    io.to(target.socketId).emit("denied")
-    delete rooms[roomId].waiting[targetId]
-  })
-
-  // ── AFTER APPROVAL (JOIN ACTUAL ROOM) ───────────────────────────────────────
   socket.on("approved", () => {
     const { roomId, userId } = socket
-
     if (!rooms[roomId]) return
 
     const user = rooms[roomId].waiting[userId]
@@ -153,7 +116,6 @@ io.on("connection", socket => {
 
     socket.join(roomId)
 
-    // Send existing users to new user
     const existing = Object.entries(rooms[roomId].members)
       .filter(([id]) => id !== userId)
       .map(([id, m]) => ({
@@ -164,105 +126,17 @@ io.on("connection", socket => {
       }))
 
     socket.emit("existing-users", existing, false, rooms[roomId].host)
-
-    // Notify others
     socket.to(roomId).emit("user-connected", userId, user.username)
 
     broadcastParticipants(roomId)
   })
 
-  // ── MEDIA STATE UPDATE ──────────────────────────────────────────────────────
-  socket.on("media-state", (micOn, camOn) => {
-    const { roomId, userId } = socket
-
-    if (!rooms[roomId]?.members[userId]) return
-
-    rooms[roomId].members[userId].micOn = micOn
-    rooms[roomId].members[userId].camOn = camOn
-
-    broadcastParticipants(roomId)
+  socket.on("user-disconnected", id => {
+    socket.to(socket.roomId).emit("user-disconnected", id)
   })
 
-  // ── SCREEN SHARE (FIXED) ────────────────────────────────────────────────────
-  socket.on("screen-share-started", () => {
-    const { roomId, userId } = socket
-    if (!rooms[roomId]) return
-
-    socket.to(roomId).emit("screen-share-started", userId)
-  })
-
-  socket.on("screen-share-stopped", () => {
-    const { roomId, userId } = socket
-    if (!rooms[roomId]) return
-
-    socket.to(roomId).emit("screen-share-stopped", userId)
-  })
-
-  // ── CHAT ────────────────────────────────────────────────────────────────────
-  socket.on("chat-message", (roomId, message, username) => {
-    socket.to(roomId).emit("chat-message", message, username)
-  })
-
-  // ── HOST: MIC CONTROL ──────────────────────────────────────────────────────
-  socket.on("host-mute-user", targetId => {
-    const { roomId, userId } = socket
-    if (!rooms[roomId] || rooms[roomId].host !== userId) return
-    const m = rooms[roomId].members[targetId]
-    if (!m) return
-    m.micOn = false
-    io.to(m.socketId).emit("force-mute")
-    broadcastParticipants(roomId)
-  })
-
-  socket.on("host-unmute-user", targetId => {
-    const { roomId, userId } = socket
-    if (!rooms[roomId] || rooms[roomId].host !== userId) return
-    const m = rooms[roomId].members[targetId]
-    if (!m) return
-    io.to(m.socketId).emit("request-unmute")   // polite — user must accept
-  })
-
-  // ── HOST: CAMERA CONTROL ────────────────────────────────────────────────────
-  socket.on("host-cam-off", targetId => {
-    const { roomId, userId } = socket
-    if (!rooms[roomId] || rooms[roomId].host !== userId) return
-    const m = rooms[roomId].members[targetId]
-    if (!m) return
-    m.camOn = false
-    io.to(m.socketId).emit("force-cam-off")
-    broadcastParticipants(roomId)
-  })
-
-  socket.on("host-cam-on", targetId => {
-    const { roomId, userId } = socket
-    if (!rooms[roomId] || rooms[roomId].host !== userId) return
-    const m = rooms[roomId].members[targetId]
-    if (!m) return
-    io.to(m.socketId).emit("request-cam-on")   // polite — user must accept
-  })
-
-  // ── KICK USER ───────────────────────────────────────────────────────────────
-  socket.on("kick-user", targetId => {
-    const { roomId, userId } = socket
-
-    if (!rooms[roomId] || rooms[roomId].host !== userId) return
-
-    const user = rooms[roomId].members[targetId]
-    if (!user) return
-
-    io.to(user.socketId).emit("you-were-kicked")
-
-    delete rooms[roomId].members[targetId]
-
-    socket.to(roomId).emit("user-disconnected", targetId)
-
-    broadcastParticipants(roomId)
-  })
-
-  // ── DISCONNECT ──────────────────────────────────────────────────────────────
   socket.on("disconnect", () => {
     const { roomId, userId } = socket
-
     if (!roomId || !rooms[roomId]) return
 
     const wasHost = rooms[roomId].host === userId
@@ -281,12 +155,9 @@ io.on("connection", socket => {
 
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  START SERVER
-// ─────────────────────────────────────────────────────────────────────────────
+// Start server
 const PORT = process.env.PORT || 3000
 
 server.listen(PORT, () => {
   console.log("🚀 Server running on port " + PORT)
 })
-
