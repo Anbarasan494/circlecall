@@ -1,19 +1,35 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  CircleCall — SERVER
+//  CircleCall — SERVER (Render-compatible)
 // ─────────────────────────────────────────────────────────────────────────────
 const express = require("express")
 const app     = express()
 const server  = require("http").createServer(app)
+const path    = require("path")
 
+// Trust Render's reverse proxy (required for HTTPS/WebSocket to work)
+app.set("trust proxy", 1)
+
+// Socket.IO — explicit transports for Render's proxy
 const io = require("socket.io")(server, {
   pingTimeout:  60000,
-  pingInterval: 25000
+  pingInterval: 25000,
+  transports:   ["websocket", "polling"],
+  cors: {
+    origin:  "*",
+    methods: ["GET", "POST"]
+  }
 })
 
-const path = require("path")
+// PeerJS — proxied:true is required behind Render's reverse proxy
 const { ExpressPeerServer } = require("peer")
+const peerServer = ExpressPeerServer(server, {
+  debug:  false,
+  path:   "/",
+  proxied: true
+})
+app.use("/peerjs", peerServer)
 
-app.use("/peerjs", ExpressPeerServer(server, { debug: true }))
+// Static files from public/
 app.use(express.static("public", { maxAge: 0 }))
 
 app.get("/",           (req, res) => res.sendFile(path.join(__dirname, "public/home.html")))
@@ -52,13 +68,11 @@ io.on("connection", socket => {
     socket.roomId = roomId
 
     if (rooms[roomId].host === userId) {
-      // Host enters directly
       rooms[roomId].members[userId] = { socketId: socket.id, username, micOn: true, camOn: true }
       socket.join(roomId)
       socket.emit("existing-users", [], true, userId)
       broadcastParticipants(roomId)
     } else {
-      // Non-host waits for approval
       rooms[roomId].waiting[userId] = { socketId: socket.id, username }
       socket.emit("waiting")
       const host = rooms[roomId].members[rooms[roomId].host]
@@ -84,7 +98,6 @@ io.on("connection", socket => {
     delete rooms[roomId].waiting[targetId]
   })
 
-  // Client confirms approval and enters the room
   socket.on("approved", () => {
     const { roomId, userId } = socket
     if (!rooms[roomId]) return
@@ -129,7 +142,7 @@ io.on("connection", socket => {
     if (!rooms[roomId] || rooms[roomId].host !== userId) return
     const m = rooms[roomId].members[targetId]
     if (!m) return
-    io.to(m.socketId).emit("request-unmute")  // polite request — user decides
+    io.to(m.socketId).emit("request-unmute")
   })
 
   // HOST: CAMERA CONTROL -------------------------------------------------------
@@ -148,7 +161,7 @@ io.on("connection", socket => {
     if (!rooms[roomId] || rooms[roomId].host !== userId) return
     const m = rooms[roomId].members[targetId]
     if (!m) return
-    io.to(m.socketId).emit("request-cam-on")  // polite request
+    io.to(m.socketId).emit("request-cam-on")
   })
 
   // SCREEN SHARE ---------------------------------------------------------------
@@ -202,4 +215,4 @@ io.on("connection", socket => {
 })
 
 const PORT = process.env.PORT || 3000
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`))
+server.listen(PORT, "0.0.0.0", () => console.log(`CircleCall running on port ${PORT}`))

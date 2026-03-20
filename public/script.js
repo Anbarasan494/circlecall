@@ -2,7 +2,13 @@
 //  CircleCall — client
 // ─────────────────────────────────────────────────────────────────────────────
 
-const socket    = io("/")
+// Force WebSocket transport — required for Render's reverse proxy
+const socket = io("/", {
+  transports: ["websocket", "polling"],
+  upgrade: true,
+  reconnectionAttempts: 10,
+  reconnectionDelay: 1000,
+})
 const videoGrid = document.getElementById("video-grid")
 const roomId    = window.location.pathname.split("/")[2]
 
@@ -34,11 +40,20 @@ const pendingCalls = []
 // ─────────────────────────────────────────────────────────────────────────────
 // Auto-detect HTTPS (Render) vs HTTP (localhost)
 const isSecure = location.protocol === "https:"
+const peerPort  = isSecure ? 443 : (parseInt(location.port) || 3000)
 const myPeer = new Peer(undefined, {
-  path:   "/peerjs",
   host:   location.hostname,
-  port:   isSecure ? 443 : (location.port || 3000),
+  port:   peerPort,
+  path:   "/peerjs",
   secure: isSecure,
+  debug:  0,
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:global.stun.twilio.com:3478" }
+    ]
+  }
 })
 
 myPeer.on("open", id => {
