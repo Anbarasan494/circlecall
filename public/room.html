@@ -4,124 +4,47 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CircleCall Meeting</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/style.css">
-</head>
-<body class="room">
 
-  <!-- ── Name modal ── -->
-  <div id="name-modal" class="modal-overlay">
+  <link rel="stylesheet" href="/style.css">
+
+  <!-- Socket.IO -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- PeerJS -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+
+<body>
+
+  <!-- 🔥 NAME INPUT MODAL -->
+  <div id="name-modal" class="modal">
     <div class="modal-box">
-      <div class="modal-logo">
-        <div class="logo-mark sm"><span class="logo-ring"></span><span class="logo-dot"></span></div>
-        <span>CircleCall</span>
-      </div>
-      <h2>Join Meeting</h2>
-      <p id="room-code-display" class="room-code-chip"></p>
-      <input id="name-input" placeholder="Your display name" maxlength="30" autocomplete="off" />
-      <button class="btn-primary" onclick="enterRoom()">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-        Join Now
-      </button>
+      <h2>Enter your name</h2>
+      <input id="name-input" placeholder="Your name..." />
+      <button onclick="enterRoom()">Join Meeting</button>
     </div>
   </div>
 
-  <!-- ── Toast ── -->
+  <!-- 🔥 MAIN MEETING UI -->
+  <div id="meeting-ui" style="display:none;">
+
+    <!-- Video grid -->
+    <div id="video-grid" class="video-grid"></div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button onclick="toggleMute()">🎙️</button>
+      <button onclick="toggleCamera()">📷</button>
+      <button onclick="leave()">Leave</button>
+    </div>
+
+  </div>
+
+  <!-- Toast -->
   <div id="toast"></div>
 
-  <!-- ── Meeting UI ── -->
-  <div class="meeting-container" id="meeting-ui" style="display:none">
-
-    <div class="video-area">
-
-      <!-- Top bar -->
-      <div class="top-bar">
-        <div class="top-bar-left">
-          <div class="logo-mark sm"><span class="logo-ring"></span><span class="logo-dot"></span></div>
-          <span class="logo-text-sm">CircleCall</span>
-        </div>
-        <div class="top-bar-center">
-          <span id="host-badge-label" class="host-badge" style="display:none">👑 Host</span>
-          <div class="room-code-pill">
-            <span id="room-id-label"></span>
-            <button class="copy-btn" onclick="copyRoomCode()" title="Copy code">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </button>
-          </div>
-        </div>
-        <div class="top-bar-right">
-          <div id="call-timer" class="call-timer">00:00</div>
-        </div>
-      </div>
-
-      <!-- Video grid -->
-      <div id="video-grid"></div>
-
-      <!-- Controls -->
-      <div class="controls">
-        <button id="btn-mute"   class="ctrl-btn" onclick="toggleMute()">
-          <span class="ctrl-icon">🎙️</span><span class="ctrl-label">Mute</span>
-        </button>
-        <button id="btn-camera" class="ctrl-btn" onclick="toggleCamera()">
-          <span class="ctrl-icon">📷</span><span class="ctrl-label">Camera</span>
-        </button>
-        <button id="btn-screen" class="ctrl-btn" onclick="toggleScreenShare()">
-          <span class="ctrl-icon">🖥️</span><span class="ctrl-label">Share</span>
-        </button>
-        <button id="btn-low"    class="ctrl-btn" onclick="toggleLowMode()">
-          <span class="ctrl-icon">📶</span><span class="ctrl-label">Low Mode</span>
-        </button>
-        <button id="btn-people" class="ctrl-btn" onclick="togglePanel('participants')">
-          <span class="ctrl-icon">👥</span>
-          <span class="ctrl-label">People&nbsp;<span id="participant-count">1</span></span>
-        </button>
-        <button id="btn-chat"   class="ctrl-btn" onclick="togglePanel('chat')">
-          <span class="ctrl-icon">💬</span><span class="ctrl-label">Chat</span>
-        </button>
-        <button class="ctrl-btn leave-btn" onclick="leave()">
-          <span class="ctrl-icon">📴</span><span class="ctrl-label">Leave</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Side panel -->
-    <div class="side-panel" id="side-panel">
-
-      <!-- Participants -->
-      <div id="panel-participants" class="panel-view" style="display:none">
-        <div class="panel-header">
-          <h3>Participants</h3>
-          <button class="panel-close" onclick="closePanel()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <ul id="participants-list"></ul>
-      </div>
-
-      <!-- Chat -->
-      <div id="panel-chat" class="panel-view chat-view" style="display:none">
-        <div class="panel-header">
-          <h3>Chat</h3>
-          <button class="panel-close" onclick="closePanel()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <ul id="messages"></ul>
-        <div class="chat-input">
-          <input id="chat_message" placeholder="Message everyone…" maxlength="500" autocomplete="off" />
-          <button class="btn-send" onclick="sendMessage()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          </button>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
+  <!-- ✅ IMPORTANT: load script LAST -->
   <script src="/script.js"></script>
+
 </body>
 </html>

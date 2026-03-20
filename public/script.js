@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────
-//  CircleCall — CLIENT (RENDER FIXED)
+//  CircleCall — CLIENT (FULLY FIXED FOR RENDER)
 // ─────────────────────────────────────────────────────────
 
 const socket = io()
@@ -9,8 +9,9 @@ const roomId = window.location.pathname.split("/")[2]
 let myStream
 let myPeerId
 let peers = {}
+let username = "Guest"
 
-// 🔥 FIXED PeerJS (IMPORTANT)
+// 🔥 PeerJS config (PRODUCTION READY)
 const myPeer = new Peer(undefined, {
   path: "/peerjs",
   host: location.hostname,
@@ -28,10 +29,41 @@ const myPeer = new Peer(undefined, {
   }
 })
 
+// ─────────────────────────────────────────
+// JOIN FLOW
+// ─────────────────────────────────────────
+
+function enterRoom() {
+  const input = document.getElementById("name-input")
+  const name = input.value.trim()
+
+  if (!name) {
+    input.style.border = "2px solid red"
+    return
+  }
+
+  username = name
+
+  document.getElementById("name-modal").style.display = "none"
+  document.getElementById("meeting-ui").style.display = "block"
+
+  start()
+}
+
+// 🔥 Make function global (IMPORTANT)
+window.enterRoom = enterRoom
+
+// ─────────────────────────────────────────
+// PEER READY
+// ─────────────────────────────────────────
+
 myPeer.on("open", id => {
   myPeerId = id
-  start()
 })
+
+// ─────────────────────────────────────────
+// START STREAM
+// ─────────────────────────────────────────
 
 function start() {
   navigator.mediaDevices.getUserMedia({
@@ -40,53 +72,131 @@ function start() {
   }).then(stream => {
 
     myStream = stream
-    addVideo(stream, "You")
+    addVideo(stream, username, true)
 
-    socket.emit("join-room", roomId, myPeerId, "User")
+    // 🔥 JOIN ROOM
+    socket.emit("join-room", roomId, myPeerId, username)
 
+    // 🔥 RECEIVE CALL
     myPeer.on("call", call => {
       call.answer(stream)
 
+      const video = createVideo()
+
       call.on("stream", userVideoStream => {
-        addVideo(userVideoStream)
+        addVideoStream(video, userVideoStream, call.peer)
       })
+
+      call.on("close", () => removeVideo(call.peer))
+
+      peers[call.peer] = call
     })
 
+    // 🔥 NEW USER CONNECTED
     socket.on("user-connected", userId => {
       connectToUser(userId, stream)
     })
 
+  }).catch(err => {
+    alert("Camera/Mic permission denied")
+    console.error(err)
   })
 }
 
+// ─────────────────────────────────────────
+// CONNECT TO NEW USER
+// ─────────────────────────────────────────
+
 function connectToUser(userId, stream) {
+  if (peers[userId]) return
+
   const call = myPeer.call(userId, stream)
+  const video = createVideo()
 
   call.on("stream", userVideoStream => {
-    addVideo(userVideoStream)
+    addVideoStream(video, userVideoStream, userId)
   })
+
+  call.on("close", () => removeVideo(userId))
 
   peers[userId] = call
 }
 
-function addVideo(stream, name = "") {
+// ─────────────────────────────────────────
+// VIDEO HANDLING
+// ─────────────────────────────────────────
+
+function createVideo() {
   const video = document.createElement("video")
-  video.srcObject = stream
   video.autoplay = true
   video.playsInline = true
+  return video
+}
 
-  const div = document.createElement("div")
-  div.appendChild(video)
+function addVideo(stream, name = "", muted = false) {
+  const video = createVideo()
+  video.srcObject = stream
+  video.muted = muted
+
+  const wrapper = document.createElement("div")
+  wrapper.dataset.id = "local"
+
+  wrapper.appendChild(video)
 
   if (name) {
     const label = document.createElement("p")
     label.innerText = name
-    div.appendChild(label)
+    wrapper.appendChild(label)
   }
 
-  videoGrid.appendChild(div)
+  videoGrid.appendChild(wrapper)
 }
 
+function addVideoStream(video, stream, id) {
+  if (document.querySelector(`[data-id="${id}"]`)) return
+
+  video.srcObject = stream
+
+  const wrapper = document.createElement("div")
+  wrapper.dataset.id = id
+  wrapper.appendChild(video)
+
+  videoGrid.appendChild(wrapper)
+}
+
+function removeVideo(id) {
+  document.querySelector(`[data-id="${id}"]`)?.remove()
+  if (peers[id]) peers[id].close()
+  delete peers[id]
+}
+
+// ─────────────────────────────────────────
+// DISCONNECT
+// ─────────────────────────────────────────
+
 socket.on("user-disconnected", userId => {
-  if (peers[userId]) peers[userId].close()
+  removeVideo(userId)
 })
+
+// ─────────────────────────────────────────
+// CONTROLS (BASIC)
+// ─────────────────────────────────────────
+
+function toggleMute() {
+  const enabled = myStream.getAudioTracks()[0].enabled
+  myStream.getAudioTracks()[0].enabled = !enabled
+}
+
+function toggleCamera() {
+  const enabled = myStream.getVideoTracks()[0].enabled
+  myStream.getVideoTracks()[0].enabled = !enabled
+}
+
+function leave() {
+  window.location.href = "/"
+}
+
+// 🔥 Make controls global
+window.toggleMute = toggleMute
+window.toggleCamera = toggleCamera
+window.leave = leave
