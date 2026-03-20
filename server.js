@@ -16,7 +16,7 @@ const io = require("socket.io")(server, {
 })
 
 const path = require("path")
-const { ExpressPeerServer } = require("peerjs")
+const { ExpressPeerServer } = require("peer")
 
 // PeerJS server
 app.use("/peerjs", ExpressPeerServer(server, { debug: true }))
