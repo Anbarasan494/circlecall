@@ -2,12 +2,14 @@
 //  CircleCall — client
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Force WebSocket transport — required for Render's reverse proxy
+// Polling first, then upgrade to WebSocket — required for Render's proxy
 const socket = io("/", {
-  transports: ["websocket", "polling"],
-  upgrade: true,
+  transports:           ["polling", "websocket"],
+  upgrade:              true,
+  reconnection:         true,
   reconnectionAttempts: 10,
-  reconnectionDelay: 1000,
+  reconnectionDelay:    2000,
+  timeout:              20000,
 })
 const videoGrid = document.getElementById("video-grid")
 const roomId    = window.location.pathname.split("/")[2]

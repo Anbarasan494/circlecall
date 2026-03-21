@@ -1,65 +1,60 @@
-// ─────────────────────────────────────────────────────────────────────────────
-//  CircleCall — SERVER (Render-compatible)
-// ─────────────────────────────────────────────────────────────────────────────
 const express = require("express")
 const app     = express()
-const server  = require("http").createServer(app)
+const http    = require("http").createServer(app)
 const path    = require("path")
 
-// Trust Render's reverse proxy (required for HTTPS/WebSocket to work)
+// Required: tell Express it's behind Render's HTTPS reverse proxy
 app.set("trust proxy", 1)
 
-// Socket.IO — explicit transports for Render's proxy
-const io = require("socket.io")(server, {
-  pingTimeout:  60000,
-  pingInterval: 25000,
-  transports:   ["websocket", "polling"],
+// Socket.IO — polling FIRST, then upgrade to websocket
+// This is critical for Render — websocket-first fails on their proxy
+const { Server } = require("socket.io")
+const io = new Server(http, {
+  pingTimeout:       60000,
+  pingInterval:      25000,
+  upgradeTimeout:    30000,
+  allowEIO3:         true,
+  transports:        ["polling", "websocket"],
+  allowUpgrades:     true,
   cors: {
-    origin:  "*",
-    methods: ["GET", "POST"]
+    origin:      "*",
+    methods:     ["GET", "POST"],
+    credentials: false
   }
 })
 
-// PeerJS — proxied:true is required behind Render's reverse proxy
+// PeerJS server — proxied:true required behind Render
 const { ExpressPeerServer } = require("peer")
-const peerServer = ExpressPeerServer(server, {
-  debug:  false,
-  path:   "/",
+app.use("/peerjs", ExpressPeerServer(http, {
+  debug:   false,
   proxied: true
-})
-app.use("/peerjs", peerServer)
+}))
 
-// Static files from public/
-app.use(express.static("public", { maxAge: 0 }))
+// Serve static files from public/
+app.use(express.static(path.join(__dirname, "public"), { maxAge: 0 }))
+app.get("/",           (_req, res) => res.sendFile(path.join(__dirname, "public/home.html")))
+app.get("/room/:room", (_req, res) => res.sendFile(path.join(__dirname, "public/room.html")))
 
-app.get("/",           (req, res) => res.sendFile(path.join(__dirname, "public/home.html")))
-app.get("/room/:room", (req, res) => res.sendFile(path.join(__dirname, "public/room.html")))
-
-/*
-  rooms[roomId] = {
-    host    : peerId,
-    members : { [peerId]: { socketId, username, micOn, camOn } },
-    waiting : { [peerId]: { socketId, username } }
-  }
-*/
+// ── Room state ────────────────────────────────────────────────────────────────
 const rooms = {}
 
-// ── Helper ────────────────────────────────────────────────────────────────────
 function broadcastParticipants(roomId) {
   if (!rooms[roomId]) return
   const list = Object.entries(rooms[roomId].members).map(([id, m]) => ({
-    id,
-    username: m.username,
-    micOn: m.micOn,
-    camOn: m.camOn
+    id, username: m.username, micOn: m.micOn, camOn: m.camOn
   }))
   io.to(roomId).emit("participants-update", list, rooms[roomId].host)
 }
 
 // ── Socket handlers ───────────────────────────────────────────────────────────
 io.on("connection", socket => {
+  console.log("socket connected:", socket.id, "| transport:", socket.conn.transport.name)
 
-  // JOIN -----------------------------------------------------------------------
+  socket.conn.on("upgrade", transport => {
+    console.log("socket upgraded to:", transport.name)
+  })
+
+  // JOIN
   socket.on("join-room", (roomId, userId, username) => {
     if (!rooms[roomId])
       rooms[roomId] = { host: userId, members: {}, waiting: {} }
@@ -80,13 +75,12 @@ io.on("connection", socket => {
     }
   })
 
-  // APPROVE / DENY -------------------------------------------------------------
+  // APPROVE / DENY
   socket.on("approve-user", targetId => {
     const { roomId, userId } = socket
     if (!rooms[roomId] || rooms[roomId].host !== userId) return
     const target = rooms[roomId].waiting[targetId]
-    if (!target) return
-    io.to(target.socketId).emit("approved")
+    if (target) io.to(target.socketId).emit("approved")
   })
 
   socket.on("deny-user", targetId => {
@@ -103,21 +97,18 @@ io.on("connection", socket => {
     if (!rooms[roomId]) return
     const user = rooms[roomId].waiting[userId]
     if (!user) return
-
     rooms[roomId].members[userId] = { ...user, micOn: true, camOn: true }
     delete rooms[roomId].waiting[userId]
     socket.join(roomId)
-
     const existing = Object.entries(rooms[roomId].members)
       .filter(([id]) => id !== userId)
       .map(([id, m]) => ({ id, username: m.username, micOn: m.micOn, camOn: m.camOn }))
-
     socket.emit("existing-users", existing, false, rooms[roomId].host)
     socket.to(roomId).emit("user-connected", userId, user.username)
     broadcastParticipants(roomId)
   })
 
-  // MEDIA STATE ----------------------------------------------------------------
+  // MEDIA STATE
   socket.on("media-state", (micOn, camOn) => {
     const { roomId, userId } = socket
     if (!rooms[roomId]?.members[userId]) return
@@ -126,7 +117,7 @@ io.on("connection", socket => {
     broadcastParticipants(roomId)
   })
 
-  // HOST: MIC CONTROL ----------------------------------------------------------
+  // HOST MIC CONTROL
   socket.on("host-mute-user", targetId => {
     const { roomId, userId } = socket
     if (!rooms[roomId] || rooms[roomId].host !== userId) return
@@ -136,16 +127,14 @@ io.on("connection", socket => {
     io.to(m.socketId).emit("force-mute")
     broadcastParticipants(roomId)
   })
-
   socket.on("host-unmute-user", targetId => {
     const { roomId, userId } = socket
     if (!rooms[roomId] || rooms[roomId].host !== userId) return
     const m = rooms[roomId].members[targetId]
-    if (!m) return
-    io.to(m.socketId).emit("request-unmute")
+    if (m) io.to(m.socketId).emit("request-unmute")
   })
 
-  // HOST: CAMERA CONTROL -------------------------------------------------------
+  // HOST CAM CONTROL
   socket.on("host-cam-off", targetId => {
     const { roomId, userId } = socket
     if (!rooms[roomId] || rooms[roomId].host !== userId) return
@@ -155,34 +144,29 @@ io.on("connection", socket => {
     io.to(m.socketId).emit("force-cam-off")
     broadcastParticipants(roomId)
   })
-
   socket.on("host-cam-on", targetId => {
     const { roomId, userId } = socket
     if (!rooms[roomId] || rooms[roomId].host !== userId) return
     const m = rooms[roomId].members[targetId]
-    if (!m) return
-    io.to(m.socketId).emit("request-cam-on")
+    if (m) io.to(m.socketId).emit("request-cam-on")
   })
 
-  // SCREEN SHARE ---------------------------------------------------------------
+  // SCREEN SHARE
   socket.on("screen-share-started", () => {
     const { roomId, userId } = socket
-    if (!rooms[roomId]) return
-    socket.to(roomId).emit("screen-share-started", userId)
+    if (rooms[roomId]) socket.to(roomId).emit("screen-share-started", userId)
   })
-
   socket.on("screen-share-stopped", () => {
     const { roomId, userId } = socket
-    if (!rooms[roomId]) return
-    socket.to(roomId).emit("screen-share-stopped", userId)
+    if (rooms[roomId]) socket.to(roomId).emit("screen-share-stopped", userId)
   })
 
-  // CHAT -----------------------------------------------------------------------
+  // CHAT
   socket.on("chat-message", (roomId, message, username) => {
     socket.to(roomId).emit("chat-message", message, username)
   })
 
-  // KICK -----------------------------------------------------------------------
+  // KICK
   socket.on("kick-user", targetId => {
     const { roomId, userId } = socket
     if (!rooms[roomId] || rooms[roomId].host !== userId) return
@@ -194,15 +178,14 @@ io.on("connection", socket => {
     broadcastParticipants(roomId)
   })
 
-  // DISCONNECT -----------------------------------------------------------------
-  socket.on("disconnect", () => {
+  // DISCONNECT
+  socket.on("disconnect", reason => {
+    console.log("socket disconnected:", socket.id, "| reason:", reason)
     const { roomId, userId } = socket
     if (!roomId || !rooms[roomId]) return
-
     const wasHost = rooms[roomId].host === userId
     delete rooms[roomId].members[userId]
     delete rooms[roomId].waiting[userId]
-
     if (wasHost) {
       io.to(roomId).emit("meeting-ended")
       delete rooms[roomId]
@@ -211,8 +194,10 @@ io.on("connection", socket => {
       broadcastParticipants(roomId)
     }
   })
-
 })
 
+// ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000
-server.listen(PORT, "0.0.0.0", () => console.log(`CircleCall running on port ${PORT}`))
+http.listen(PORT, "0.0.0.0", () => {
+  console.log(`CircleCall server running on port ${PORT}`)
+})
