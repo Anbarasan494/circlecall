@@ -506,21 +506,30 @@ body.room { background: var(--night); overflow: hidden; }
 /* ── Video grid ─────────────────────────────────────────────────────────────── */
 #video-grid {
   flex: 1; min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px; padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px; padding: 10px;
   background: var(--night);
-  overflow-y: auto;
-  align-content: start;
+  overflow: hidden;
 }
 
-/* Video tile */
+/* Each row inside the grid */
+.grid-row {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-height: 0;
+}
+
+/* Video tile — fills its flex cell */
 .video-wrapper {
   position: relative;
   background: var(--surface);
   border-radius: var(--r-md);
   overflow: hidden;
-  aspect-ratio: 16/9;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   border: 1px solid var(--border);
   transition: border-color 0.3s, box-shadow 0.3s;
 }
@@ -1014,7 +1023,7 @@ body.room { background: var(--night); overflow: hidden; }
   .controls { gap: 5px; padding: 8px 10px; }
   .ctrl-btn { min-width: 50px; padding: 7px 8px; }
   .ctrl-label { display: none; }
-  #video-grid { grid-template-columns: 1fr; padding: 8px; gap: 8px; }
+  #video-grid { padding: 6px; gap: 6px; } .grid-row { gap: 6px; }
   .home-card { width: 92vw; padding: 30px 22px; }
   .modal-box { width: 92vw; padding: 32px 22px; }
   .ss-pip { width: 130px; bottom: 70px; right: 12px; }

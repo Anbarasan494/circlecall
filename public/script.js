@@ -156,16 +156,20 @@ function enterRoom() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Video tile management
 // ─────────────────────────────────────────────────────────────────────────────
+// tileStore holds all wrapper divs in insertion order
+// updateGridLayout reads from here and rebuilds the DOM rows
+const tileStore = []
+
 function addVideoTile(id, video, stream, name) {
   // Guard: never add duplicates
-  if (document.querySelector(`[data-uid="${id}"]`)) return
+  if (tileStore.find(t => t.dataset.uid === id)) return
 
   video.srcObject = stream
   safePlay(video)
 
   const wrapper = document.createElement("div")
   wrapper.classList.add("video-wrapper")
-  wrapper.dataset.uid = id      // ← FIX: uid on wrapper so removal works
+  wrapper.dataset.uid = id
   wrapper.appendChild(video)
 
   // Name tag
@@ -180,13 +184,13 @@ function addVideoTile(id, video, stream, name) {
   icons.innerHTML = `<span class="ts-mic">🎙️</span><span class="ts-cam">📷</span>`
   wrapper.appendChild(icons)
 
-  videoGrid.appendChild(wrapper)
+  tileStore.push(wrapper)
   updateGridLayout()
 }
 
-// ── FIX: remove by data-uid, not by video element ────────────────────────────
 function removeVideoTile(id) {
-  document.querySelector(`[data-uid="${id}"]`)?.remove()
+  const idx = tileStore.findIndex(t => t.dataset.uid === id)
+  if (idx !== -1) tileStore.splice(idx, 1)
   try { peers[id]?.call?.close() } catch {}
   delete peers[id]
   delete usernames[id]
@@ -196,7 +200,7 @@ function removeVideoTile(id) {
 }
 
 function setTileStatus(id, micOn, camOn) {
-  const wrapper = document.querySelector(`[data-uid="${id}"]`)
+  const wrapper = tileStore.find(t => t.dataset.uid === id)
   if (!wrapper) return
   const mic = wrapper.querySelector(".ts-mic")
   const cam = wrapper.querySelector(".ts-cam")
@@ -333,7 +337,8 @@ socket.on("screen-share-started", sharerId => {
   // The sharer replaced their video track via replaceTrack — the stream event
   // fires on the existing peer connection, so we get the screen via the
   // existing video element. Mount the overlay using that element's srcObject.
-  const existingVideo = document.querySelector(`[data-uid="${sharerId}"] video`)
+  const existingTile = tileStore.find(t => t.dataset.uid === sharerId)
+  const existingVideo = existingTile?.querySelector("video")
   if (existingVideo) {
     mountScreenShareUI(existingVideo.srcObject, null, sharerId, usernames[sharerId])
   }
@@ -696,9 +701,75 @@ function copyRoomCode() {
 }
 
 function updateGridLayout() {
-  const n = videoGrid.querySelectorAll(".video-wrapper").length
-  videoGrid.style.gridTemplateColumns =
-    n <= 1 ? "1fr" : n <= 4 ? "repeat(2,1fr)" : "repeat(3,1fr)"
+  // Read from tileStore — the single source of truth for all tiles
+  const tiles = tileStore
+  const n = tiles.length
+  if (n === 0) return
+
+  // Determine row layout — how many tiles per row
+  // Rules: each row must be full (or last row centred), tiles fill screen evenly
+  let rowLayout  // array of counts per row e.g. [2,2,1] for 5 people
+
+  if      (n === 1)  rowLayout = [1]
+  else if (n === 2)  rowLayout = [2]
+  else if (n === 3)  rowLayout = [3]
+  else if (n === 4)  rowLayout = [2, 2]
+  else if (n === 5)  rowLayout = [3, 2]
+  else if (n === 6)  rowLayout = [3, 3]
+  else if (n === 7)  rowLayout = [4, 3]
+  else if (n === 8)  rowLayout = [4, 4]
+  else if (n === 9)  rowLayout = [3, 3, 3]
+  else if (n === 10) rowLayout = [4, 3, 3]
+  else if (n === 11) rowLayout = [4, 4, 3]
+  else if (n === 12) rowLayout = [4, 4, 4]
+  else if (n === 13) rowLayout = [4, 3, 3, 3]
+  else if (n === 14) rowLayout = [4, 4, 3, 3]
+  else if (n === 15) rowLayout = [4, 4, 4, 3]
+  else if (n === 16) rowLayout = [4, 4, 4, 4]
+  else {
+    // For very large numbers: try to make a square-ish grid
+    const cols = Math.ceil(Math.sqrt(n))
+    rowLayout = []
+    let remaining = n
+    while (remaining > 0) {
+      const take = Math.min(cols, remaining)
+      rowLayout.push(take)
+      remaining -= take
+    }
+  }
+
+  // Clear the grid completely
+  videoGrid.innerHTML = ""
+
+  // Rebuild: create one .grid-row div per row, put tiles into them
+  let tileIndex = 0
+  rowLayout.forEach(count => {
+    const row = document.createElement("div")
+    row.className = "grid-row"
+
+    // For the last row with fewer tiles, centre them by adding flex justify
+    if (count < rowLayout[0]) {
+      row.style.justifyContent = "center"
+      // Each tile in a short row should not stretch to fill full width
+      // Give them a max-width matching what a full row tile would be
+      const tileMaxWidth = `calc(${(100 / rowLayout[0]).toFixed(2)}% - 8px)`
+      for (let i = 0; i < count; i++) {
+        const tile = tiles[tileIndex++]
+        if (!tile) return
+        tile.style.maxWidth = tileMaxWidth
+        row.appendChild(tile)
+      }
+    } else {
+      for (let i = 0; i < count; i++) {
+        const tile = tiles[tileIndex++]
+        if (!tile) return
+        tile.style.maxWidth = ""
+        row.appendChild(tile)
+      }
+    }
+
+    videoGrid.appendChild(row)
+  })
 }
 
 function startTimer() {
