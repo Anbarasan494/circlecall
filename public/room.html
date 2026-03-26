@@ -6,7 +6,7 @@
   <title>CircleCall Meeting</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body class="room">
@@ -77,11 +77,11 @@
 
       <!-- Controls -->
       <div class="controls">
-        <button id="btn-mute"   class="ctrl-btn" onclick="toggleMute()">
+        <button id="btn-mute"   class="ctrl-btn ctrl-btn--active" onclick="toggleMute()">
           <span class="ctrl-icon">🎙️</span>
           <span class="ctrl-label">Mute</span>
         </button>
-        <button id="btn-camera" class="ctrl-btn" onclick="toggleCamera()">
+        <button id="btn-camera" class="ctrl-btn ctrl-btn--active" onclick="toggleCamera()">
           <span class="ctrl-icon">📷</span>
           <span class="ctrl-label">Camera</span>
         </button>
@@ -89,10 +89,12 @@
           <span class="ctrl-icon">🖥️</span>
           <span class="ctrl-label">Share</span>
         </button>
+        <!--
         <button id="btn-low"    class="ctrl-btn" onclick="toggleLowMode()">
           <span class="ctrl-icon">📶</span>
           <span class="ctrl-label">Low Mode</span>
         </button>
+      -->
         <button id="btn-people" class="ctrl-btn" onclick="togglePanel('participants')">
           <span class="ctrl-icon">👥</span>
           <span class="ctrl-label">People <span id="participant-count">1</span></span>
@@ -145,5 +147,58 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
   <script src="/script.js"></script>
+
+  <script>
+    /* ── Button state helpers ──────────────────────────────────────────────── */
+    // Call these from script.js whenever mic/camera state changes,
+    // OR patch via MutationObserver on the emoji icon as a fallback.
+
+    function syncMuteBtn(isMuted) {
+      const btn = document.getElementById('btn-mute');
+      if (!btn) return;
+      btn.classList.toggle('ctrl-btn--active', !isMuted);
+      btn.classList.toggle('ctrl-btn--muted',   isMuted);
+      const icon  = btn.querySelector('.ctrl-icon');
+      const label = btn.querySelector('.ctrl-label');
+      if (icon)  icon.textContent  = isMuted ? '🔇' : '🎙️';
+      if (label) label.textContent = isMuted ? 'Unmute' : 'Mute';
+    }
+
+    function syncCameraBtn(isCameraOff) {
+      const btn = document.getElementById('btn-camera');
+      if (!btn) return;
+      btn.classList.toggle('ctrl-btn--active', !isCameraOff);
+      btn.classList.toggle('ctrl-btn--muted',   isCameraOff);
+      const icon  = btn.querySelector('.ctrl-icon');
+      const label = btn.querySelector('.ctrl-label');
+      if (icon)  icon.textContent  = isCameraOff ? '📵' : '📷';
+      if (label) label.textContent = isCameraOff ? 'Start Cam' : 'Camera';
+    }
+
+    /* Intercept existing toggleMute / toggleCamera once script.js has loaded */
+    window.addEventListener('load', () => {
+      const _origMute   = window.toggleMute;
+      const _origCamera = window.toggleCamera;
+
+      let _muted     = false;
+      let _camOff    = false;
+
+      if (typeof _origMute === 'function') {
+        window.toggleMute = function(...a) {
+          _origMute(...a);
+          _muted = !_muted;
+          syncMuteBtn(_muted);
+        };
+      }
+
+      if (typeof _origCamera === 'function') {
+        window.toggleCamera = function(...a) {
+          _origCamera(...a);
+          _camOff = !_camOff;
+          syncCameraBtn(_camOff);
+        };
+      }
+    });
+  </script>
 </body>
 </html>

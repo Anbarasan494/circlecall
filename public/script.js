@@ -383,7 +383,7 @@ function applyCamOff(off) {
 
 function toggleMute()   { applyMute(!isMuted) }
 function toggleCamera() { applyCamOff(!isCameraOff) }
-
+/*
 function toggleLowMode() {
   isLowMode = !isLowMode
   myStream?.getVideoTracks()[0]?.applyConstraints(
@@ -400,7 +400,7 @@ function leave() {
   myStream?.getTracks().forEach(t => t.stop())
   window.location.href = "/"
 }
-
+*/
 // ─────────────────────────────────────────────────────────────────────────────
 //  Screen share
 // ─────────────────────────────────────────────────────────────────────────────
