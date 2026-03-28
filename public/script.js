@@ -334,13 +334,10 @@ socket.on("request-cam-on", () => {
 socket.on("screen-share-started", sharerId => {
   if (sharerId === myPeerId) return
   showToast(`${usernames[sharerId] || "Someone"} is sharing their screen`, "info")
-  // Give replaceTrack a moment to propagate before reading the stream
   setTimeout(() => {
-    const tile  = tileStore.find(t => t.dataset.uid === sharerId)
-    const vid   = tile?.querySelector("video")
-    if (vid?.srcObject) {
-      enterPresentationMode(vid.srcObject, null, sharerId, usernames[sharerId])
-    }
+    const tile = tileStore.find(t => t.dataset.uid === sharerId)
+    const vid  = tile?.querySelector("video")
+    if (vid?.srcObject) enterPresentationMode(vid.srcObject, sharerId, usernames[sharerId])
   }, 700)
 })
 
@@ -402,8 +399,13 @@ function leave() {
 }
 */
 // ─────────────────────────────────────────────────────────────────────────────
-//  Screen share  —  LEFT: participant thumbnails  |  RIGHT: shared screen
+//  Screen share  —  LEFT thumbnails  |  RIGHT shared screen
+//  • No duplicate tile for presenter (existing tile moves to strip)
+//  • Blank overlay shown when presenter is on the meeting tab itself
 // ─────────────────────────────────────────────────────────────────────────────
+
+let _ssVisCleanup = null   // stores visibilitychange cleanup fn
+
 async function toggleScreenShare() {
   if (isScreenSharing) { stopScreenShare(); return }
 
@@ -423,11 +425,9 @@ async function toggleScreenShare() {
     }
 
     socket.emit("screen-share-started")
+    enterPresentationMode(screenStream, "local", username)
 
-    // Enter presentation layout: thumbnails LEFT, screen RIGHT
-    enterPresentationMode(screenStream, myStream, "local", username)
-
-    // Browser's native "Stop sharing" button also cleans up
+    // Browser "Stop sharing" button
     screenTrack.onended = stopScreenShare
 
     const btn = document.getElementById("btn-screen")
@@ -443,6 +443,9 @@ function stopScreenShare() {
   screenStream.getTracks().forEach(t => t.stop())
   screenStream    = null
   isScreenSharing = false
+
+  // Remove visibility listener
+  if (_ssVisCleanup) { _ssVisCleanup(); _ssVisCleanup = null }
 
   // Restore camera track in every peer connection
   const camTrack = myStream?.getVideoTracks()[0]
@@ -460,54 +463,25 @@ function stopScreenShare() {
   btn.querySelector(".ctrl-label").textContent = "Share"
 }
 
-// ── Build presentation layout ─────────────────────────────────────────────────
-// Structure inside .video-area:
-//   [top-bar]
-//   [#ss-presentation-wrap]
-//     [#ss-thumb-col]   ← LEFT: all participant tiles + sharer's camera
-//     [#ss-screen-col]  ← RIGHT: the shared screen
-//   [.controls]
-
-function enterPresentationMode(screenSrc, camSrc, sharerId, sharerName) {
-  exitPresentationMode()   // always start clean
+// ── Presentation layout ───────────────────────────────────────────────────────
+function enterPresentationMode(screenSrc, sharerId, sharerName) {
+  exitPresentationMode()   // clean slate
 
   const videoArea = document.querySelector(".video-area")
   videoArea.classList.add("ss-active")
 
-  // ── Wrapper that sits between top-bar and controls ──
   const wrap = document.createElement("div")
   wrap.id = "ss-presentation-wrap"
 
-  // ─── LEFT column: thumbnail strip ───────────────────
+  // LEFT: move ALL existing tiles into the thumb strip — no extra cam tile
   const thumbCol = document.createElement("div")
   thumbCol.id = "ss-thumb-col"
-
-  // Move every existing tile into the thumb strip
   tileStore.forEach(tile => {
     tile.classList.add("ss-thumb-tile")
     thumbCol.appendChild(tile)
   })
 
-  // If the sharer's camera stream exists and they are local, add a dedicated cam tile
-  if (camSrc && sharerId === "local") {
-    const camWrap = document.createElement("div")
-    camWrap.id = "ss-cam-tile"
-    camWrap.classList.add("ss-thumb-tile")
-
-    const camVid = makeVideoEl(true)   // muted — it's your own mic
-    camVid.srcObject = camSrc
-    safePlay(camVid)
-    camWrap.appendChild(camVid)
-
-    const camTag = document.createElement("div")
-    camTag.className = "name-tag"
-    camTag.textContent = (sharerName || username || "You") + " (cam)"
-    camWrap.appendChild(camTag)
-
-    thumbCol.appendChild(camWrap)
-  }
-
-  // ─── RIGHT column: shared screen ────────────────────
+  // RIGHT: shared screen + blank overlay
   const screenCol = document.createElement("div")
   screenCol.id = "ss-screen-col"
 
@@ -517,50 +491,72 @@ function enterPresentationMode(screenSrc, camSrc, sharerId, sharerName) {
   safePlay(screenVid)
   screenCol.appendChild(screenVid)
 
-  const label = document.createElement("div")
-  label.className = "ss-presenter-label"
-  label.textContent = `${sharerName || usernames[sharerId] || "Someone"} is presenting`
-  screenCol.appendChild(label)
+  const presLabel = document.createElement("div")
+  presLabel.className = "ss-presenter-label"
+  presLabel.textContent = `${sharerName || usernames[sharerId] || "Someone"} is presenting`
+  screenCol.appendChild(presLabel)
 
-  // ── Assemble and inject before controls ──
+  // Blank overlay — only visible when presenter's tab is in focus
+  const blank = document.createElement("div")
+  blank.id = "ss-blank-overlay"
+  blank.innerHTML = `
+    <div class="ss-blank-inner">
+      <div class="ss-blank-icon">🖥️</div>
+      <p class="ss-blank-title">Screen paused</p>
+      <p class="ss-blank-sub">Switch to another window or tab<br>so participants can see your screen</p>
+    </div>`
+  screenCol.appendChild(blank)
+
   wrap.appendChild(thumbCol)
   wrap.appendChild(screenCol)
 
   const controls = videoArea.querySelector(".controls")
   videoArea.insertBefore(wrap, controls)
-
-  // Hide the normal video grid (tiles are now in the thumb strip)
   videoGrid.style.display = "none"
+
+  // Start blank-watcher only for the local sharer
+  if (sharerId === "local") _startBlankWatcher()
 }
 
 function exitPresentationMode() {
+  if (_ssVisCleanup) { _ssVisCleanup(); _ssVisCleanup = null }
+
   const videoArea = document.querySelector(".video-area")
   videoArea.classList.remove("ss-active")
 
   const wrap = document.getElementById("ss-presentation-wrap")
   if (wrap) {
-    // Return all tiles to the video grid
     tileStore.forEach(tile => {
       tile.classList.remove("ss-thumb-tile")
       videoGrid.appendChild(tile)
     })
-    // Remove the dedicated cam tile (clone — not in tileStore)
-    document.getElementById("ss-cam-tile")?.remove()
     wrap.remove()
   }
 
-  // Restore grid
   videoGrid.style.display = "grid"
   updateGridLayout()
 }
 
-// ── Remote peer started sharing ───────────────────────────────────────────────
-function mountScreenShareUI(screenSrc, camSrc, sharerId, sharerName) {
-  enterPresentationMode(screenSrc, camSrc, sharerId, sharerName)
+// ── Blank-screen watcher (Page Visibility API) ────────────────────────────────
+// Tab VISIBLE  (document.hidden=false) → user is on meeting page → show blank
+// Tab HIDDEN   (document.hidden=true)  → user on another tab/window → show screen
+function _startBlankWatcher() {
+  function syncBlank() {
+    const blank = document.getElementById("ss-blank-overlay")
+    if (!blank) return
+    // Show blank when the meeting tab is in the foreground
+    blank.classList.toggle("ss-blank-visible", !document.hidden)
+  }
+  syncBlank()   // set immediately on start
+  document.addEventListener("visibilitychange", syncBlank)
+  _ssVisCleanup = () => document.removeEventListener("visibilitychange", syncBlank)
 }
-function unmountScreenShareUI() {
-  exitPresentationMode()
+
+// Legacy aliases kept for safety
+function mountScreenShareUI(screenSrc, _camSrc, sharerId, sharerName) {
+  enterPresentationMode(screenSrc, sharerId, sharerName)
 }
+function unmountScreenShareUI() { exitPresentationMode() }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Panels
