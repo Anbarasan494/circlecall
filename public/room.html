@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>CircleCall Meeting</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -77,34 +77,29 @@
 
       <!-- Controls -->
       <div class="controls">
-        <button id="btn-mute"   class="ctrl-btn ctrl-btn--active" onclick="toggleMute()">
-          <span class="ctrl-icon">🎙️</span>
+        <button id="btn-mute" class="ctrl-btn ctrl-btn--active" onclick="toggleMute()">
+          <span class="ctrl-icon"></span>
           <span class="ctrl-label">Mute</span>
         </button>
         <button id="btn-camera" class="ctrl-btn ctrl-btn--active" onclick="toggleCamera()">
-          <span class="ctrl-icon">📷</span>
+          <span class="ctrl-icon"></span>
           <span class="ctrl-label">Camera</span>
         </button>
         <button id="btn-screen" class="ctrl-btn" onclick="toggleScreenShare()">
-          <span class="ctrl-icon">🖥️</span>
+          <span class="ctrl-icon"></span>
           <span class="ctrl-label">Share</span>
         </button>
-        <!--
-        <button id="btn-low"    class="ctrl-btn" onclick="toggleLowMode()">
-          <span class="ctrl-icon">📶</span>
-          <span class="ctrl-label">Low Mode</span>
-        </button>
-      -->
         <button id="btn-people" class="ctrl-btn" onclick="togglePanel('participants')">
-          <span class="ctrl-icon">👥</span>
+          <span class="ctrl-icon"></span>
           <span class="ctrl-label">People <span id="participant-count">1</span></span>
         </button>
-        <button id="btn-chat"   class="ctrl-btn" onclick="togglePanel('chat')">
-          <span class="ctrl-icon">💬</span>
+        <button id="btn-chat" class="ctrl-btn" onclick="togglePanel('chat')" style="position:relative">
+          <span class="ctrl-icon"></span>
           <span class="ctrl-label">Chat</span>
+          <span id="chat-badge" class="chat-badge" style="display:none">0</span>
         </button>
-        <button class="ctrl-btn leave-btn" onclick="leave()">
-          <span class="ctrl-icon">📴</span>
+        <button id="btn-leave" class="ctrl-btn leave-btn" onclick="leave()">
+          <span class="ctrl-icon"></span>
           <span class="ctrl-label">Leave</span>
         </button>
       </div>
@@ -147,58 +142,5 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
   <script src="/script.js"></script>
-
-  <script>
-    /* ── Button state helpers ──────────────────────────────────────────────── */
-    // Call these from script.js whenever mic/camera state changes,
-    // OR patch via MutationObserver on the emoji icon as a fallback.
-
-    function syncMuteBtn(isMuted) {
-      const btn = document.getElementById('btn-mute');
-      if (!btn) return;
-      btn.classList.toggle('ctrl-btn--active', !isMuted);
-      btn.classList.toggle('ctrl-btn--muted',   isMuted);
-      const icon  = btn.querySelector('.ctrl-icon');
-      const label = btn.querySelector('.ctrl-label');
-      if (icon)  icon.textContent  = isMuted ? '🔇' : '🎙️';
-      if (label) label.textContent = isMuted ? 'Unmute' : 'Mute';
-    }
-
-    function syncCameraBtn(isCameraOff) {
-      const btn = document.getElementById('btn-camera');
-      if (!btn) return;
-      btn.classList.toggle('ctrl-btn--active', !isCameraOff);
-      btn.classList.toggle('ctrl-btn--muted',   isCameraOff);
-      const icon  = btn.querySelector('.ctrl-icon');
-      const label = btn.querySelector('.ctrl-label');
-      if (icon)  icon.textContent  = isCameraOff ? '📵' : '📷';
-      if (label) label.textContent = isCameraOff ? 'Start Cam' : 'Camera';
-    }
-
-    /* Intercept existing toggleMute / toggleCamera once script.js has loaded */
-    window.addEventListener('load', () => {
-      const _origMute   = window.toggleMute;
-      const _origCamera = window.toggleCamera;
-
-      let _muted     = false;
-      let _camOff    = false;
-
-      if (typeof _origMute === 'function') {
-        window.toggleMute = function(...a) {
-          _origMute(...a);
-          _muted = !_muted;
-          syncMuteBtn(_muted);
-        };
-      }
-
-      if (typeof _origCamera === 'function') {
-        window.toggleCamera = function(...a) {
-          _origCamera(...a);
-          _camOff = !_camOff;
-          syncCameraBtn(_camOff);
-        };
-      }
-    });
-  </script>
 </body>
 </html>

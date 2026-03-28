@@ -1,26 +1,25 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  CircleCall — client
+//  CircleCall — client  (full rewrite with all features)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Polling first, then upgrade to WebSocket — required for Render's proxy
 const socket = io("/", {
-  transports:           ["polling", "websocket"],
-  upgrade:              true,
-  reconnection:         true,
+  transports: ["polling", "websocket"],
+  upgrade: true,
+  reconnection: true,
   reconnectionAttempts: 10,
-  reconnectionDelay:    2000,
-  timeout:              20000,
+  reconnectionDelay: 2000,
+  timeout: 20000,
 })
+
 const videoGrid = document.getElementById("video-grid")
 const roomId    = window.location.pathname.split("/")[2]
 
-// ── state ─────────────────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────────
 let myStream, myPeerId, username, myVideo
-let amHost      = false
-let hostId      = null
-let isMuted     = false
-let isCameraOff = false
-let isLowMode   = false
+let amHost          = false
+let hostId          = null
+let isMuted         = false
+let isCameraOff     = false
 let isScreenSharing = false
 let screenStream    = null
 let activePanel     = null
@@ -28,19 +27,22 @@ let callStartTime   = null
 let timerInterval   = null
 let peerReady       = false
 let streamReady     = false
+let pinnedId        = null
+let chatUnread      = 0
+let _ssVisCleanup   = null
+let _audioCtx       = null
+let _analyserNodes  = {}
 
-// peers[peerId] = { call, wrapper }   — wrapper is the .video-wrapper div
-const peers      = {}
-const usernames  = {}   // peerId → display name
-const mediaState = {}   // peerId → { micOn, camOn }
-
-// Calls that arrived before myStream was ready — answered once stream is set
+const peers       = {}
+const usernames   = {}
+const mediaState  = {}
 const pendingCalls = []
+const tileStore   = []
+let waitingList   = {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PeerJS
 // ─────────────────────────────────────────────────────────────────────────────
-// Auto-detect HTTPS (Render) vs HTTP (localhost)
 const isSecure = location.protocol === "https:"
 const peerPort  = isSecure ? 443 : (parseInt(location.port) || 3000)
 const myPeer = new Peer(undefined, {
@@ -64,37 +66,26 @@ myPeer.on("open", id => {
   peerReady = true
   tryJoin()
 })
-
-myPeer.on("error", err => {
-  console.error("PeerJS error:", err)
-  showToast("Connection error: " + err.type, "error")
-})
-
-// ── FIX: queue calls that arrive before getUserMedia completes ────────────────
+myPeer.on("error", err => { console.error("PeerJS:", err); showToast("Connection error: " + err.type, "error") })
 myPeer.on("call", call => {
-  if (!streamReady || !myStream) {
-    pendingCalls.push(call)
-    return
-  }
+  if (!streamReady || !myStream) { pendingCalls.push(call); return }
   answerCall(call)
 })
 
 function answerCall(call) {
   call.answer(myStream)
-
   const video = makeVideoEl()
   call.on("stream", remoteStream => {
-    // Guard: only add tile once per peer
     if (peers[call.peer]?.added) return
     if (!peers[call.peer]) peers[call.peer] = { call, added: false }
     peers[call.peer].added = true
     addVideoTile(call.peer, video, remoteStream, usernames[call.peer])
+    attachSpeakingDetector(call.peer, remoteStream)
   })
   call.on("close", () => removeVideoTile(call.peer))
   call.on("error", e => console.warn("inbound call error:", e))
 }
 
-// Answer all calls that were queued before stream was ready
 function drainPendingCalls() {
   while (pendingCalls.length) answerCall(pendingCalls.shift())
 }
@@ -104,46 +95,59 @@ function drainPendingCalls() {
 // ─────────────────────────────────────────────────────────────────────────────
 function makeVideoEl(muted = false) {
   const v = document.createElement("video")
-  v.autoplay    = true
-  v.playsInline = true   // required for iOS Safari
-  v.muted       = muted
+  v.autoplay = true; v.playsInline = true; v.muted = muted
   return v
 }
-
 function tryJoin() {
-  if (peerReady && streamReady)
-    socket.emit("join-room", roomId, myPeerId, username)
+  if (peerReady && streamReady) socket.emit("join-room", roomId, myPeerId, username)
 }
-
 function safePlay(v) {
-  v.play().catch(() =>
-    v.addEventListener("loadedmetadata", () => v.play(), { once: true }))
+  v.play().catch(() => v.addEventListener("loadedmetadata", () => v.play(), { once: true }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  enterRoom — called by name-modal Join button
+//  SVG icons (professional — no emoji in buttons)
+// ─────────────────────────────────────────────────────────────────────────────
+const SVG = {
+  micOn:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+  micOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+  camOn:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`,
+  camOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/></svg>`,
+  share:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><polyline points="8 21 12 17 16 21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+  people: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+  chat:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+  leave:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`,
+  send:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
+  pin:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6.5-1.5 1.5-2-5-4 4 5 2-1.5 1.5 4 4 1.5-1.5 2 5 4-4-5-2 1.5-1.5z"/><line x1="2" y1="22" x2="9.5" y2="14.5"/></svg>`,
+  unpin:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="m15 6.5-1.5 1.5-2-5-4 4 5 2-1.5 1.5 4 4 1.5-1.5"/><line x1="2" y1="22" x2="9.5" y2="14.5"/></svg>`,
+  check:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+  close:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  kick:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="17" y1="8" x2="23" y2="14"/><line x1="23" y1="8" x2="17" y2="14"/></svg>`,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  enterRoom
 // ─────────────────────────────────────────────────────────────────────────────
 function enterRoom() {
   const inp  = document.getElementById("name-input")
   const name = inp.value.trim()
-  if (!name) { inp.style.outline = "2px solid #ff6b6b"; inp.focus(); return }
+  if (!name) { inp.style.outline = "2px solid #f43f5e"; inp.focus(); return }
 
   username = name
   if (myPeerId) usernames[myPeerId] = username
 
-  document.getElementById("name-modal").style.display  = "none"
-  document.getElementById("meeting-ui").style.display  = "flex"
+  document.getElementById("name-modal").style.display = "none"
+  document.getElementById("meeting-ui").style.display = "flex"
   document.getElementById("room-id-label").textContent = roomId
 
   navigator.mediaDevices.getUserMedia({ video: true, audio: true })
     .then(stream => {
       myStream = stream
-
-      myVideo = makeVideoEl(true)   // muted locally — no echo
+      myVideo  = makeVideoEl(true)
       addVideoTile("local", myVideo, stream, username)
-
+      attachLocalSpeakingDetector()
       streamReady = true
-      drainPendingCalls()   // answer any calls that arrived early
+      drainPendingCalls()
       startTimer()
       tryJoin()
     })
@@ -156,79 +160,182 @@ function enterRoom() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Video tile management
 // ─────────────────────────────────────────────────────────────────────────────
-// tileStore holds all wrapper divs in insertion order
-// updateGridLayout reads from here and rebuilds the DOM rows
-const tileStore = []
-
 function addVideoTile(id, video, stream, name) {
-  // Guard: never add duplicates
   if (tileStore.find(t => t.dataset.uid === id)) return
-
   video.srcObject = stream
   safePlay(video)
 
   const wrapper = document.createElement("div")
   wrapper.classList.add("video-wrapper")
   wrapper.dataset.uid = id
+
+  // Avatar initials (shown when camera off)
+  const av = document.createElement("div")
+  av.className = "tile-avatar"
+  av.textContent = (name || "?")[0].toUpperCase()
+  av.style.background = avatarColor(name || "")
+  wrapper.appendChild(av)
+
   wrapper.appendChild(video)
 
   // Name tag
   const tag = document.createElement("div")
-  tag.classList.add("name-tag")
+  tag.className = "name-tag"
   tag.textContent = name || usernames[id] || "Guest"
   wrapper.appendChild(tag)
 
-  // Mic / cam status icons
+  // Status icons
   const icons = document.createElement("div")
-  icons.classList.add("tile-status")
-  icons.innerHTML = `<span class="ts-mic">🎙️</span><span class="ts-cam">📷</span>`
+  icons.className = "tile-status"
+  icons.innerHTML = `<span class="ts-mic">${SVG.micOn}</span><span class="ts-cam">${SVG.camOn}</span>`
   wrapper.appendChild(icons)
+
+  // Speaking ring
+  const ring = document.createElement("div")
+  ring.className = "speaking-ring"
+  wrapper.appendChild(ring)
+
+  // Pin overlay (hover)
+  const pinOv = document.createElement("div")
+  pinOv.className = "pin-overlay"
+  pinOv.innerHTML = `<button class="pin-btn">${SVG.pin}<span>Pin</span></button>`
+  pinOv.querySelector(".pin-btn").addEventListener("click", e => { e.stopPropagation(); togglePin(id) })
+  wrapper.appendChild(pinOv)
 
   tileStore.push(wrapper)
   updateGridLayout()
 }
 
 function removeVideoTile(id) {
+  detachSpeakingDetector(id)
   const idx = tileStore.findIndex(t => t.dataset.uid === id)
   if (idx !== -1) tileStore.splice(idx, 1)
   try { peers[id]?.call?.close() } catch {}
-  delete peers[id]
-  delete usernames[id]
-  delete mediaState[id]
+  delete peers[id]; delete usernames[id]; delete mediaState[id]
+  if (pinnedId === id) pinnedId = null
   updateGridLayout()
   rerenderParticipants()
 }
 
 function setTileStatus(id, micOn, camOn) {
-  const wrapper = tileStore.find(t => t.dataset.uid === id)
-  if (!wrapper) return
-  const mic = wrapper.querySelector(".ts-mic")
-  const cam = wrapper.querySelector(".ts-cam")
-  if (mic) { mic.textContent = micOn ? "🎙️" : "🔇"; mic.style.filter = micOn ? "" : "grayscale(1)" }
-  if (cam) { cam.textContent = camOn ? "📷" : "📵"; cam.style.filter = camOn ? "" : "grayscale(1)" }
+  const w = tileStore.find(t => t.dataset.uid === id)
+  if (!w) return
+  const mic = w.querySelector(".ts-mic")
+  const cam = w.querySelector(".ts-cam")
+  if (mic) mic.innerHTML = micOn ? SVG.micOn : SVG.micOff
+  if (cam) cam.innerHTML = camOn ? SVG.camOn : SVG.camOff
+  // Show avatar when cam is off
+  const av  = w.querySelector(".tile-avatar")
+  const vid = w.querySelector("video")
+  if (av)  av.style.display  = camOn ? "none"  : "flex"
+  if (vid) vid.style.display = camOn ? "block" : "none"
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  callPeer — outbound call
+//  Pinning
 // ─────────────────────────────────────────────────────────────────────────────
-function callPeer(id, name) {
-  if (peers[id]) return           // already connected
-  if (!myStream) {
-    // Stream not yet ready — will be called again from existing-users once stream is set
-    console.warn("callPeer: myStream not ready for", id)
+function togglePin(id) {
+  pinnedId = (pinnedId === id) ? null : id
+  tileStore.forEach(t => {
+    const isPinned = t.dataset.uid === pinnedId
+    t.classList.toggle("pinned", isPinned)
+    const btn = t.querySelector(".pin-btn")
+    if (btn) btn.innerHTML = (isPinned ? SVG.unpin : SVG.pin) + `<span>${isPinned ? "Unpin" : "Pin"}</span>`
+  })
+  updateGridLayout()
+  showToast(pinnedId ? `Pinned ${usernames[pinnedId] || "tile"}` : "Unpinned", "info", 1500)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Grid layout
+// ─────────────────────────────────────────────────────────────────────────────
+function updateGridLayout() {
+  const n = tileStore.length
+  if (n === 0) return
+  const isMobile = window.innerWidth <= 700
+
+  if (pinnedId && n > 1) {
+    // Pinned layout: main + sidebar strip
+    videoGrid.innerHTML = ""
+    videoGrid.style.display = "flex"
+    videoGrid.style.flexDirection = isMobile ? "column" : "row"
+    videoGrid.style.gridTemplateColumns = ""
+    videoGrid.style.gridTemplateRows    = ""
+
+    const pinned = tileStore.find(t => t.dataset.uid === pinnedId)
+    const others = tileStore.filter(t => t.dataset.uid !== pinnedId)
+
+    if (pinned) {
+      pinned.style.flex = "1"
+      pinned.style.aspectRatio = ""
+      pinned.style.width = "100%"
+      pinned.style.height = isMobile ? "calc(100% - 126px)" : "100%"
+      pinned.style.minWidth = "0"
+      videoGrid.appendChild(pinned)
+    }
+
+    const strip = document.createElement("div")
+    strip.className = "pin-strip"
+    strip.style.cssText = isMobile
+      ? "display:flex;flex-direction:row;gap:6px;overflow-x:auto;padding:4px 6px;height:120px;flex-shrink:0;"
+      : "display:flex;flex-direction:column;gap:6px;overflow-y:auto;padding:6px 4px;width:190px;flex-shrink:0;"
+    others.forEach(t => {
+      t.style.flex        = ""
+      t.style.width       = isMobile ? "100px" : "100%"
+      t.style.height      = isMobile ? "100px" : "auto"
+      t.style.aspectRatio = "1/1"
+      t.style.flexShrink  = "0"
+      strip.appendChild(t)
+    })
+    videoGrid.appendChild(strip)
     return
   }
 
-  const call  = myPeer.call(id, myStream)
-  if (!call)  { console.warn("myPeer.call() returned null for", id); return }
+  // Normal CSS grid
+  let cols
+  if      (n === 1) cols = 1
+  else if (n === 2) cols = 2
+  else if (n === 3) cols = 3
+  else if (n === 4) cols = 4
+  else if (n <= 6)  cols = 3
+  else if (n <= 9)  cols = 3
+  else if (n <= 16) cols = 4
+  else              cols = Math.ceil(Math.sqrt(n))
+  if (isMobile && cols > 2) cols = 2
 
+  videoGrid.style.display             = "grid"
+  videoGrid.style.flexDirection       = ""
+  videoGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
+  videoGrid.style.gridTemplateRows    = ""
+  videoGrid.innerHTML                 = ""
+
+  tileStore.forEach(t => {
+    t.style.flex        = ""
+    t.style.width       = "100%"
+    t.style.height      = "100%"
+    t.style.aspectRatio = "1/1"
+    t.style.flexShrink  = ""
+    videoGrid.appendChild(t)
+  })
+}
+
+window.addEventListener("resize", () => { if (tileStore.length) updateGridLayout() })
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  callPeer — outbound
+// ─────────────────────────────────────────────────────────────────────────────
+function callPeer(id, name) {
+  if (peers[id]) return
+  if (!myStream) { console.warn("callPeer: myStream not ready for", id); return }
+  const call = myPeer.call(id, myStream)
+  if (!call) { console.warn("myPeer.call() null for", id); return }
   const video = makeVideoEl()
-  peers[id]   = { call, added: false }
-
+  peers[id] = { call, added: false }
   call.on("stream", remoteStream => {
     if (peers[id]?.added) return
     peers[id].added = true
     addVideoTile(id, video, remoteStream, name || usernames[id])
+    attachSpeakingDetector(id, remoteStream)
     rerenderParticipants()
   })
   call.on("close", () => removeVideoTile(id))
@@ -236,16 +343,42 @@ function callPeer(id, name) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Speaking detection
+// ─────────────────────────────────────────────────────────────────────────────
+function getAudioCtx() {
+  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+  return _audioCtx
+}
+function attachLocalSpeakingDetector() { if (myStream) _attachAnalyser("local", myStream) }
+function attachSpeakingDetector(id, stream) { _attachAnalyser(id, stream) }
+function _attachAnalyser(id, stream) {
+  try {
+    const ctx = getAudioCtx()
+    const src = ctx.createMediaStreamSource(stream)
+    const an  = ctx.createAnalyser()
+    an.fftSize = 512; an.smoothingTimeConstant = 0.3
+    src.connect(an)
+    const data = new Uint8Array(an.frequencyBinCount)
+    const interval = setInterval(() => {
+      an.getByteFrequencyData(data)
+      const vol = data.reduce((a, b) => a + b, 0) / data.length
+      const tile = tileStore.find(t => t.dataset.uid === id)
+      if (tile) tile.classList.toggle("speaking", vol > 12)
+    }, 100)
+    _analyserNodes[id] = { interval }
+  } catch(e) {}
+}
+function detachSpeakingDetector(id) {
+  if (_analyserNodes[id]) { clearInterval(_analyserNodes[id].interval); delete _analyserNodes[id] }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Socket events
 // ─────────────────────────────────────────────────────────────────────────────
-
 socket.on("existing-users", (users, isHost, hId) => {
-  amHost = isHost
-  hostId = hId
+  amHost = isHost; hostId = hId
   if (isHost) document.getElementById("host-badge-label").style.display = "inline-flex"
-
   users.forEach(u => {
-    // Support both object {id,username,...} and plain string (defensive)
     const uid   = typeof u === "object" ? u.id       : u
     const uname = typeof u === "object" ? u.username : (usernames[uid] || uid)
     usernames[uid]  = uname
@@ -256,49 +389,35 @@ socket.on("existing-users", (users, isHost, hId) => {
 })
 
 socket.on("user-connected", (id, name) => {
-  usernames[id]  = name
-  mediaState[id] = { micOn: true, camOn: true }
+  usernames[id] = name; mediaState[id] = { micOn: true, camOn: true }
   showToast(`${name} joined`, "success")
   callPeer(id, name)
 })
+socket.on("user-disconnected", id => { showToast(`${usernames[id] || "Someone"} left`); removeVideoTile(id) })
 
-socket.on("user-disconnected", id => {
-  showToast(`${usernames[id] || "Someone"} left`)
-  removeVideoTile(id)
-})
-
-// Waiting room ----------------------------------------------------------------
 socket.on("waiting", () => showWaitingScreen())
-
 socket.on("user-waiting", (id, name) => {
   if (!amHost) return
+  waitingList[id] = name
   showAdmitCard(id, name)
+  rerenderParticipants()
 })
-
-// ── FIX: approved triggers socket.emit("approved") to finalise join ──────────
 socket.on("approved", () => {
-  hideWaitingScreen()
-  showToast("You were admitted!", "success")
-  socket.emit("approved")   // signals server → server sends existing-users back
+  hideWaitingScreen(); showToast("You were admitted!", "success"); socket.emit("approved")
 })
-
 socket.on("denied", () => {
-  hideWaitingScreen()
-  showToast("The host denied your request.", "error")
+  hideWaitingScreen(); showToast("Host denied your request.", "error")
   setTimeout(() => window.location.href = "/", 2000)
 })
-
 socket.on("you-were-kicked", () => {
   showToast("You were removed from the meeting.", "error")
   setTimeout(() => window.location.href = "/", 2000)
 })
-
 socket.on("meeting-ended", () => {
   showToast("Meeting ended by host", "info")
   setTimeout(() => window.location.href = "/", 1500)
 })
 
-// Participants live update ----------------------------------------------------
 socket.on("participants-update", (list, hId) => {
   hostId = hId
   list.forEach(p => {
@@ -311,26 +430,11 @@ socket.on("participants-update", (list, hId) => {
   rerenderParticipants(list)
 })
 
-// Host mic/cam commands -------------------------------------------------------
-socket.on("force-mute", () => {
-  applyMute(true)
-  showToast("Host muted your microphone", "info")
-})
+socket.on("force-mute",     () => { applyMute(true);   showToast("Host muted your mic", "info") })
+socket.on("request-unmute", () => showActionPrompt("Host asked you to unmute.", "Unmute", () => applyMute(false)))
+socket.on("force-cam-off",  () => { applyCamOff(true); showToast("Host turned off your camera", "info") })
+socket.on("request-cam-on", () => showActionPrompt("Host asked you to turn on camera.", "Turn on", () => applyCamOff(false)))
 
-socket.on("request-unmute", () => {
-  showActionPrompt("The host asked you to unmute.", "Unmute", () => applyMute(false))
-})
-
-socket.on("force-cam-off", () => {
-  applyCamOff(true)
-  showToast("Host turned off your camera", "info")
-})
-
-socket.on("request-cam-on", () => {
-  showActionPrompt("The host asked you to turn on your camera.", "Turn on", () => applyCamOff(false))
-})
-
-// Screen share (remote) -------------------------------------------------------
 socket.on("screen-share-started", sharerId => {
   if (sharerId === myPeerId) return
   showToast(`${usernames[sharerId] || "Someone"} is sharing their screen`, "info")
@@ -340,31 +444,38 @@ socket.on("screen-share-started", sharerId => {
     if (vid?.srcObject) enterPresentationMode(vid.srcObject, sharerId, usernames[sharerId])
   }, 700)
 })
-
 socket.on("screen-share-stopped", sharerId => {
-  showToast(`${usernames[sharerId] || "Someone"} stopped sharing`, "info")
-  exitPresentationMode()
+  showToast(`${usernames[sharerId] || "Someone"} stopped sharing`, "info"); exitPresentationMode()
 })
 
-// Chat ------------------------------------------------------------------------
-socket.on("chat-message", (message, senderName) => appendMessage(senderName, message, false))
+socket.on("chat-message", (message, senderName) => {
+  appendMessage(senderName, message, false)
+  if (activePanel !== "chat") {
+    chatUnread++
+    const badge = document.getElementById("chat-badge")
+    if (badge) { badge.textContent = chatUnread; badge.style.display = "flex" }
+    showToast(`${senderName}: ${message.slice(0, 40)}`, "info", 3000)
+  }
+})
 
-// Socket reconnection ---------------------------------------------------------
 socket.on("connect_error", () => showToast("Connection lost, reconnecting…", "error"))
 socket.on("reconnect",     () => showToast("Reconnected!", "success"))
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Mic / cam control
+//  Mic / cam
 // ─────────────────────────────────────────────────────────────────────────────
 function applyMute(mute) {
   isMuted = mute
   const track = myStream?.getAudioTracks()[0]
   if (track) track.enabled = !mute
   const btn = document.getElementById("btn-mute")
-  btn.classList.toggle("ctrl-btn--active", mute)
-  btn.querySelector(".ctrl-icon").textContent  = mute ? "🔇" : "🎙️"
+  if (!btn) return
+  btn.classList.toggle("ctrl-btn--active", !mute)
+  btn.classList.toggle("ctrl-btn--muted",   mute)
+  btn.querySelector(".ctrl-icon").innerHTML    = mute ? SVG.micOff : SVG.micOn
   btn.querySelector(".ctrl-label").textContent = mute ? "Unmute" : "Mute"
   socket.emit("media-state", !isMuted, !isCameraOff)
+  setTileStatus("local", !isMuted, !isCameraOff)
 }
 
 function applyCamOff(off) {
@@ -372,52 +483,42 @@ function applyCamOff(off) {
   const track = myStream?.getVideoTracks()[0]
   if (track) track.enabled = !off
   const btn = document.getElementById("btn-camera")
-  btn.classList.toggle("ctrl-btn--active", off)
-  btn.querySelector(".ctrl-icon").textContent  = off ? "📵" : "📷"
+  if (!btn) return
+  btn.classList.toggle("ctrl-btn--active", !off)
+  btn.classList.toggle("ctrl-btn--muted",   off)
+  btn.querySelector(".ctrl-icon").innerHTML    = off ? SVG.camOff : SVG.camOn
   btn.querySelector(".ctrl-label").textContent = off ? "Start Cam" : "Camera"
   socket.emit("media-state", !isMuted, !isCameraOff)
+  setTileStatus("local", !isMuted, !isCameraOff)
 }
 
 function toggleMute()   { applyMute(!isMuted) }
 function toggleCamera() { applyCamOff(!isCameraOff) }
-/*
-function toggleLowMode() {
-  isLowMode = !isLowMode
-  myStream?.getVideoTracks()[0]?.applyConstraints(
-    isLowMode ? { width: 320, height: 240, frameRate: 10 }
-              : { width: 1280, height: 720, frameRate: 30 }
-  )
-  const btn = document.getElementById("btn-low")
-  btn.classList.toggle("ctrl-btn--active", isLowMode)
-  btn.querySelector(".ctrl-label").textContent = isLowMode ? "Normal" : "Low Mode"
-  showToast(isLowMode ? "Low bandwidth mode on" : "Normal quality restored", "info")
-}
 
 function leave() {
+  if (isScreenSharing) stopScreenShare()
   myStream?.getTracks().forEach(t => t.stop())
+  Object.values(_analyserNodes).forEach(n => clearInterval(n.interval))
+  socket.disconnect()
   window.location.href = "/"
 }
-*/
-// ─────────────────────────────────────────────────────────────────────────────
-//  Screen share  —  LEFT thumbnails  |  RIGHT shared screen
-//  • No duplicate tile for presenter (existing tile moves to strip)
-//  • Blank overlay shown when presenter is on the meeting tab itself
-// ─────────────────────────────────────────────────────────────────────────────
 
-let _ssVisCleanup = null   // stores visibilitychange cleanup fn
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Screen share
+// ─────────────────────────────────────────────────────────────────────────────
 async function toggleScreenShare() {
   if (isScreenSharing) { stopScreenShare(); return }
 
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    showToast("Screen sharing not supported on this browser/device.", "error", 4000)
+    return
+  }
+
   try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: "always" },
-      audio: false
-    })
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" }, audio: false })
     isScreenSharing = true
     const screenTrack = screenStream.getVideoTracks()[0]
 
-    // Push screen track to every peer connection
     for (const pid in peers) {
       const pc     = peers[pid].call?.peerConnection
       const sender = pc?.getSenders().find(s => s.track?.kind === "video")
@@ -426,13 +527,10 @@ async function toggleScreenShare() {
 
     socket.emit("screen-share-started")
     enterPresentationMode(screenStream, "local", username)
-
-    // Browser "Stop sharing" button
     screenTrack.onended = stopScreenShare
 
     const btn = document.getElementById("btn-screen")
-    btn.classList.add("ctrl-btn--active")
-    btn.querySelector(".ctrl-label").textContent = "Stop Share"
+    if (btn) { btn.classList.add("ctrl-btn--active"); btn.querySelector(".ctrl-label").textContent = "Stop" }
   } catch {
     showToast("Screen share cancelled or unavailable", "info")
   }
@@ -441,50 +539,37 @@ async function toggleScreenShare() {
 function stopScreenShare() {
   if (!screenStream) return
   screenStream.getTracks().forEach(t => t.stop())
-  screenStream    = null
-  isScreenSharing = false
-
-  // Remove visibility listener
+  screenStream = null; isScreenSharing = false
   if (_ssVisCleanup) { _ssVisCleanup(); _ssVisCleanup = null }
 
-  // Restore camera track in every peer connection
   const camTrack = myStream?.getVideoTracks()[0]
   for (const pid in peers) {
     const pc     = peers[pid].call?.peerConnection
     const sender = pc?.getSenders().find(s => s.track?.kind === "video")
     if (sender && camTrack) sender.replaceTrack(camTrack)
   }
-
   socket.emit("screen-share-stopped")
   exitPresentationMode()
-
   const btn = document.getElementById("btn-screen")
-  btn.classList.remove("ctrl-btn--active")
-  btn.querySelector(".ctrl-label").textContent = "Share"
+  if (btn) { btn.classList.remove("ctrl-btn--active"); btn.querySelector(".ctrl-label").textContent = "Share" }
 }
 
-// ── Presentation layout ───────────────────────────────────────────────────────
 function enterPresentationMode(screenSrc, sharerId, sharerName) {
-  exitPresentationMode()   // clean slate
-
+  exitPresentationMode()
   const videoArea = document.querySelector(".video-area")
   videoArea.classList.add("ss-active")
 
   const wrap = document.createElement("div")
   wrap.id = "ss-presentation-wrap"
 
-  // LEFT: move ALL existing tiles into the thumb strip — no extra cam tile
+  // LEFT: thumbnail strip (existing tiles, no duplicate)
   const thumbCol = document.createElement("div")
   thumbCol.id = "ss-thumb-col"
-  tileStore.forEach(tile => {
-    tile.classList.add("ss-thumb-tile")
-    thumbCol.appendChild(tile)
-  })
+  tileStore.forEach(tile => { tile.classList.add("ss-thumb-tile"); thumbCol.appendChild(tile) })
 
-  // RIGHT: shared screen + blank overlay
+  // RIGHT: screen
   const screenCol = document.createElement("div")
   screenCol.id = "ss-screen-col"
-
   const screenVid = makeVideoEl(true)
   screenVid.id = "ss-screen-video"
   screenVid.srcObject = screenSrc
@@ -496,67 +581,41 @@ function enterPresentationMode(screenSrc, sharerId, sharerName) {
   presLabel.textContent = `${sharerName || usernames[sharerId] || "Someone"} is presenting`
   screenCol.appendChild(presLabel)
 
-  // Blank overlay — only visible when presenter's tab is in focus
+  // Blank overlay when sharer is on meeting tab
   const blank = document.createElement("div")
   blank.id = "ss-blank-overlay"
-  blank.innerHTML = `
-    <div class="ss-blank-inner">
-      <div class="ss-blank-icon">🖥️</div>
-      <p class="ss-blank-title">Screen paused</p>
-      <p class="ss-blank-sub">Switch to another window or tab<br>so participants can see your screen</p>
-    </div>`
+  blank.innerHTML = `<div class="ss-blank-inner"><div class="ss-blank-icon">${SVG.share}</div><p class="ss-blank-title">Screen paused</p><p class="ss-blank-sub">Switch to another window so participants can see your screen</p></div>`
   screenCol.appendChild(blank)
 
   wrap.appendChild(thumbCol)
   wrap.appendChild(screenCol)
-
-  const controls = videoArea.querySelector(".controls")
-  videoArea.insertBefore(wrap, controls)
+  videoArea.insertBefore(wrap, videoArea.querySelector(".controls"))
   videoGrid.style.display = "none"
 
-  // Start blank-watcher only for the local sharer
   if (sharerId === "local") _startBlankWatcher()
 }
 
 function exitPresentationMode() {
   if (_ssVisCleanup) { _ssVisCleanup(); _ssVisCleanup = null }
-
-  const videoArea = document.querySelector(".video-area")
-  videoArea.classList.remove("ss-active")
-
+  document.querySelector(".video-area")?.classList.remove("ss-active")
   const wrap = document.getElementById("ss-presentation-wrap")
   if (wrap) {
-    tileStore.forEach(tile => {
-      tile.classList.remove("ss-thumb-tile")
-      videoGrid.appendChild(tile)
-    })
+    tileStore.forEach(tile => { tile.classList.remove("ss-thumb-tile"); videoGrid.appendChild(tile) })
     wrap.remove()
   }
-
   videoGrid.style.display = "grid"
   updateGridLayout()
 }
 
-// ── Blank-screen watcher (Page Visibility API) ────────────────────────────────
-// Tab VISIBLE  (document.hidden=false) → user is on meeting page → show blank
-// Tab HIDDEN   (document.hidden=true)  → user on another tab/window → show screen
 function _startBlankWatcher() {
-  function syncBlank() {
-    const blank = document.getElementById("ss-blank-overlay")
-    if (!blank) return
-    // Show blank when the meeting tab is in the foreground
-    blank.classList.toggle("ss-blank-visible", !document.hidden)
+  function sync() {
+    const b = document.getElementById("ss-blank-overlay")
+    if (b) b.classList.toggle("ss-blank-visible", !document.hidden)
   }
-  syncBlank()   // set immediately on start
-  document.addEventListener("visibilitychange", syncBlank)
-  _ssVisCleanup = () => document.removeEventListener("visibilitychange", syncBlank)
+  sync()
+  document.addEventListener("visibilitychange", sync)
+  _ssVisCleanup = () => document.removeEventListener("visibilitychange", sync)
 }
-
-// Legacy aliases kept for safety
-function mountScreenShareUI(screenSrc, _camSrc, sharerId, sharerName) {
-  enterPresentationMode(screenSrc, sharerId, sharerName)
-}
-function unmountScreenShareUI() { exitPresentationMode() }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Panels
@@ -569,8 +628,12 @@ function togglePanel(name) {
   document.getElementById("panel-chat").style.display         = name === "chat"         ? "flex" : "none"
   document.getElementById("btn-people").classList.toggle("ctrl-btn--active", name === "participants")
   document.getElementById("btn-chat").classList.toggle("ctrl-btn--active",   name === "chat")
+  if (name === "chat") {
+    chatUnread = 0
+    const badge = document.getElementById("chat-badge")
+    if (badge) badge.style.display = "none"
+  }
 }
-
 function closePanel() {
   document.getElementById("side-panel").classList.remove("open")
   activePanel = null
@@ -589,64 +652,87 @@ function rerenderParticipants(list) {
   const count = document.getElementById("participant-count")
   if (!ul) return
 
-  // Always include self
-  const self = {
-    id: myPeerId || "local",
-    username: username || "You",
-    micOn: !isMuted,
-    camOn: !isCameraOff,
-    isSelf: true
-  }
-
-  const map = {}
+  const self = { id: myPeerId || "local", username: username || "You", micOn: !isMuted, camOn: !isCameraOff, isSelf: true }
+  const map  = {}
   lastParticipantList.forEach(p => { map[p.id] = { ...p, isSelf: false } })
   map[self.id] = self
 
-  const all    = Object.values(map)
-  count.textContent = all.length
-  ul.innerHTML      = ""
+  const all = Object.values(map)
+  count.textContent = all.length + Object.keys(waitingList).length
+  ul.innerHTML = ""
 
+  // Waiting section (host only)
+  if (amHost && Object.keys(waitingList).length > 0) {
+    const wh = document.createElement("li")
+    wh.className = "panel-section-header"
+    wh.textContent = `Waiting (${Object.keys(waitingList).length})`
+    ul.appendChild(wh)
+
+    Object.entries(waitingList).forEach(([wId, wName]) => {
+      const li = document.createElement("li")
+      li.className = "participant-item"
+      li.innerHTML = `
+        <div class="p-row">
+          <div class="p-avatar" style="background:${avatarColor(wName)}">${(wName[0]||"?").toUpperCase()}</div>
+          <div class="p-info">
+            <span class="p-name">${escapeHtml(wName)}</span>
+            <span class="p-sub">Waiting to join…</span>
+          </div>
+          <div class="p-actions">
+            <button class="icon-btn icon-btn--green" title="Admit">${SVG.check}</button>
+            <button class="icon-btn icon-btn--red"   title="Deny">${SVG.close}</button>
+          </div>
+        </div>`
+      li.querySelector(".icon-btn--green").onclick = () => {
+        socket.emit("approve-user", wId); delete waitingList[wId]; rerenderParticipants()
+      }
+      li.querySelector(".icon-btn--red").onclick = () => {
+        socket.emit("deny-user", wId); delete waitingList[wId]; rerenderParticipants()
+      }
+      ul.appendChild(li)
+    })
+
+    const dv = document.createElement("li")
+    dv.className = "panel-section-header"
+    dv.textContent = "In meeting"
+    ul.appendChild(dv)
+  }
+
+  // Active participants
   all.forEach(p => {
     const isHost = p.id === hostId
     const li = document.createElement("li")
-    li.classList.add("participant-item")
+    li.className = "participant-item"
+
+    const micIco = `<span class="p-icon ${p.micOn ? "p-icon--on":"p-icon--off"}" title="${p.micOn?"Mic on":"Muted"}">${p.micOn ? SVG.micOn : SVG.micOff}</span>`
+    const camIco = `<span class="p-icon ${p.camOn ? "p-icon--on":"p-icon--off"}" title="${p.camOn?"Cam on":"Cam off"}">${p.camOn ? SVG.camOn : SVG.camOff}</span>`
 
     li.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;width:100%">
+      <div class="p-row">
         <div class="p-avatar" style="background:${avatarColor(p.username)}">${(p.username[0]||"?").toUpperCase()}</div>
         <div class="p-info">
-          <span class="p-name">${escapeHtml(p.username)}${p.isSelf ? ' <em>(You)</em>' : ""}${isHost ? " 👑" : ""}</span>
-          <span class="p-status">
-            <span title="Mic">${p.micOn ? "🎙️" : "🔇"}</span>
-            <span title="Camera">${p.camOn ? "📷" : "📵"}</span>
-          </span>
+          <span class="p-name">${escapeHtml(p.username)}${p.isSelf?' <em>(You)</em>':""}${isHost?' <span class="host-crown">👑</span>':""}</span>
+          <span class="p-icons-row">${micIco}${camIco}</span>
         </div>
+        ${amHost && !p.isSelf ? `<div class="p-actions" id="hc-${p.id}"></div>` : ""}
       </div>`
 
-    // Host controls shown for every non-self participant
     if (amHost && !p.isSelf) {
-      const hc = document.createElement("div")
-      hc.className = "hc-row"
+      const ad = li.querySelector(`#hc-${p.id}`)
+      const mb = document.createElement("button")
+      mb.className = "icon-btn"; mb.title = p.micOn ? "Mute" : "Unmute"; mb.innerHTML = p.micOn ? SVG.micOn : SVG.micOff
+      mb.onclick = () => socket.emit(p.micOn ? "host-mute-user" : "host-unmute-user", p.id)
 
-      const micBtn = document.createElement("button")
-      micBtn.className = "hc-btn"
-      micBtn.textContent = p.micOn ? "🔇 Mute" : "🎙️ Unmute"
-      micBtn.onclick = () => socket.emit(p.micOn ? "host-mute-user" : "host-unmute-user", p.id)
+      const cb = document.createElement("button")
+      cb.className = "icon-btn"; cb.title = p.camOn ? "Stop cam" : "Start cam"; cb.innerHTML = p.camOn ? SVG.camOn : SVG.camOff
+      cb.onclick = () => socket.emit(p.camOn ? "host-cam-off" : "host-cam-on", p.id)
 
-      const camBtn = document.createElement("button")
-      camBtn.className = "hc-btn"
-      camBtn.textContent = p.camOn ? "📵 Stop cam" : "📷 Start cam"
-      camBtn.onclick = () => socket.emit(p.camOn ? "host-cam-off" : "host-cam-on", p.id)
+      const kb = document.createElement("button")
+      kb.className = "icon-btn icon-btn--red"; kb.title = "Remove"; kb.innerHTML = SVG.kick
+      kb.onclick = () => confirm(`Remove ${p.username}?`) && socket.emit("kick-user", p.id)
 
-      const kickBtn = document.createElement("button")
-      kickBtn.className = "hc-btn hc-btn--danger"
-      kickBtn.textContent = "Remove"
-      kickBtn.onclick = () => confirm(`Remove ${p.username}?`) && socket.emit("kick-user", p.id)
-
-      hc.append(micBtn, camBtn, kickBtn)
-      li.appendChild(hc)
+      ad.append(mb, cb, kb)
     }
-
     ul.appendChild(li)
   })
 }
@@ -664,19 +750,12 @@ function showWaitingScreen() {
   document.getElementById("name-modal").style.display = "none"
   let el = document.getElementById("waiting-screen")
   if (!el) {
-    el = document.createElement("div")
-    el.id = "waiting-screen"
-    el.innerHTML = `
-      <div class="waiting-box">
-        <div class="waiting-spinner"></div>
-        <h3>Waiting for host</h3>
-        <p>The host will admit you shortly…</p>
-      </div>`
+    el = document.createElement("div"); el.id = "waiting-screen"
+    el.innerHTML = `<div class="waiting-box"><div class="waiting-spinner"></div><h3>Waiting for host</h3><p>The host will admit you shortly…</p></div>`
     document.body.appendChild(el)
   }
   el.style.display = "flex"
 }
-
 function hideWaitingScreen() {
   const el = document.getElementById("waiting-screen")
   if (el) el.style.display = "none"
@@ -684,13 +763,10 @@ function hideWaitingScreen() {
 
 function showAdmitCard(id, name) {
   let container = document.getElementById("admit-container")
-  if (!container) {
-    container = document.createElement("div")
-    container.id = "admit-container"
-    document.body.appendChild(container)
-  }
+  if (!container) { container = document.createElement("div"); container.id = "admit-container"; document.body.appendChild(container) }
+  if (container.querySelector(`[data-uid="${id}"]`)) return
   const card = document.createElement("div")
-  card.className = "admit-card"
+  card.className = "admit-card"; card.dataset.uid = id
   card.innerHTML = `
     <div class="admit-info">
       <div class="admit-avatar">${(name[0]||"?").toUpperCase()}</div>
@@ -700,19 +776,14 @@ function showAdmitCard(id, name) {
       <button class="admit-deny">Deny</button>
       <button class="admit-allow">Admit</button>
     </div>`
-  card.querySelector(".admit-allow").onclick = () => { socket.emit("approve-user", id); card.remove() }
-  card.querySelector(".admit-deny").onclick  = () => { socket.emit("deny-user",    id); card.remove() }
+  card.querySelector(".admit-allow").onclick = () => { socket.emit("approve-user", id); delete waitingList[id]; card.remove(); rerenderParticipants() }
+  card.querySelector(".admit-deny").onclick  = () => { socket.emit("deny-user",    id); delete waitingList[id]; card.remove(); rerenderParticipants() }
   container.appendChild(card)
 }
 
 function showActionPrompt(message, btnLabel, action) {
-  const d = document.createElement("div")
-  d.className = "action-prompt"
-  d.innerHTML = `<p>${message}</p>
-    <div class="ap-btns">
-      <button class="ap-dismiss">Dismiss</button>
-      <button class="ap-action">${btnLabel}</button>
-    </div>`
+  const d = document.createElement("div"); d.className = "action-prompt"
+  d.innerHTML = `<p>${message}</p><div class="ap-btns"><button class="ap-dismiss">Dismiss</button><button class="ap-action">${btnLabel}</button></div>`
   d.querySelector(".ap-action").onclick  = () => { action(); d.remove() }
   d.querySelector(".ap-dismiss").onclick = () => d.remove()
   document.body.appendChild(d)
@@ -730,17 +801,16 @@ function sendMessage() {
   appendMessage(username, msg, true)
   inp.value = ""
 }
-
 function appendMessage(sender, text, isSelf) {
   const ul = document.getElementById("messages")
+  if (!ul) return
   const li = document.createElement("li")
   li.classList.add("msg-item", isSelf ? "msg-self" : "msg-other")
-  li.innerHTML = `<span class="msg-sender">${isSelf ? "You" : escapeHtml(sender)}</span>
-                  <span class="msg-text">${escapeHtml(text)}</span>`
+  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  li.innerHTML = `<span class="msg-sender">${isSelf ? "You" : escapeHtml(sender)}</span><span class="msg-text">${escapeHtml(text)}</span><span class="msg-time">${time}</span>`
   ul.appendChild(li)
   ul.scrollTop = ul.scrollHeight
 }
-
 function escapeHtml(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
 }
@@ -748,77 +818,49 @@ function escapeHtml(s) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Utilities
 // ─────────────────────────────────────────────────────────────────────────────
-// ── FIX: showToast sets className correctly with all required classes ─────────
 function showToast(message, type = "info", duration = 3000) {
   const t = document.getElementById("toast")
   if (!t) return
   t.textContent = message
-  // Set both base class and modifier at once — avoids partial class wipe
   t.className = `toast--show toast--${type}`
   if (duration > 0) setTimeout(() => { t.className = "" }, duration)
 }
-
 function copyRoomCode() {
   navigator.clipboard.writeText(roomId).then(() => showToast("Room code copied!", "success"))
 }
-
-function updateGridLayout() {
-  const tiles = tileStore
-  const n = tiles.length
-  if (n === 0) return
-
-  const isMobile = window.innerWidth <= 700
-
-  let cols
-  if      (n === 1)  cols = 1
-  else if (n === 2)  cols = 2
-  else if (n === 3)  cols = 3
-  else if (n === 4)  cols = 4
-  else if (n <= 6)   cols = 3
-  else if (n <= 9)   cols = 3
-  else if (n <= 12)  cols = 4
-  else if (n <= 16)  cols = 4
-  else               cols = Math.ceil(Math.sqrt(n))
-
-  if (isMobile && cols > 2) cols = 2
-
-  videoGrid.style.display             = "grid"
-  videoGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
-  videoGrid.style.gridAutoRows        = "1fr"
-  videoGrid.style.alignItems          = "stretch"
-  videoGrid.style.justifyItems        = "stretch"
-
-  videoGrid.innerHTML = ""
-  tiles.forEach(tile => {
-    tile.style.maxWidth = ""
-    tile.style.width    = "100%"
-    tile.style.height   = "100%"
-    videoGrid.appendChild(tile)
-  })
-}
-
-window.addEventListener("resize", () => { if (tileStore.length) updateGridLayout() })
-
 function startTimer() {
   callStartTime = Date.now()
   timerInterval = setInterval(() => {
-    const s  = Math.floor((Date.now() - callStartTime) / 1000)
+    const s = Math.floor((Date.now() - callStartTime) / 1000)
     const el = document.getElementById("call-timer")
-    if (el) el.textContent =
-      `${String(Math.floor(s / 60)).padStart(2,"0")}:${String(s % 60).padStart(2,"0")}`
+    if (el) el.textContent = `${String(Math.floor(s / 60)).padStart(2,"0")}:${String(s % 60).padStart(2,"0")}`
   }, 1000)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  DOMContentLoaded wiring
+//  DOMContentLoaded — wire up SVG icons into control buttons
 // ─────────────────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   const display = document.getElementById("room-code-display")
   if (display) display.textContent = `Code: ${roomId}`
 
-  document.getElementById("name-input")
-    ?.addEventListener("keydown", e => e.key === "Enter" && enterRoom())
+  document.getElementById("name-input")?.addEventListener("keydown", e => e.key === "Enter" && enterRoom())
+  document.getElementById("chat_message")?.addEventListener("keydown", e => e.key === "Enter" && sendMessage())
 
-  document.getElementById("chat_message")
-    ?.addEventListener("keydown", e => e.key === "Enter" && sendMessage())
+  // Set SVG icons on control buttons
+  const iconMap = {
+    "btn-mute":   { icon: SVG.micOn,  label: "Mute",   active: true  },
+    "btn-camera": { icon: SVG.camOn,  label: "Camera", active: true  },
+    "btn-screen": { icon: SVG.share,  label: "Share",  active: false },
+    "btn-people": { icon: SVG.people, label: null,     active: false },
+    "btn-chat":   { icon: SVG.chat,   label: null,     active: false },
+    "btn-leave":  { icon: SVG.leave,  label: "Leave",  active: false },
+  }
+  Object.entries(iconMap).forEach(([id, cfg]) => {
+    const btn = document.getElementById(id)
+    if (!btn) return
+    const iconEl = btn.querySelector(".ctrl-icon")
+    if (iconEl) iconEl.innerHTML = cfg.icon
+    if (cfg.active) btn.classList.add("ctrl-btn--active")
+  })
 })
