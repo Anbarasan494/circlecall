@@ -701,76 +701,46 @@ function copyRoomCode() {
 }
 
 function updateGridLayout() {
-  // Read from tileStore — the single source of truth for all tiles
   const tiles = tileStore
   const n = tiles.length
   if (n === 0) return
 
-  // Determine row layout — how many tiles per row
-  // Rules: each row must be full (or last row centred), tiles fill screen evenly
-  let rowLayout  // array of counts per row e.g. [2,2,1] for 5 people
+  const isMobile = window.innerWidth <= 700
 
-  if      (n === 1)  rowLayout = [1]
-  else if (n === 2)  rowLayout = [2]
-  else if (n === 3)  rowLayout = [3]
-  else if (n === 4)  rowLayout = [2, 2]
-  else if (n === 5)  rowLayout = [3, 2]
-  else if (n === 6)  rowLayout = [3, 3]
-  else if (n === 7)  rowLayout = [4, 3]
-  else if (n === 8)  rowLayout = [4, 4]
-  else if (n === 9)  rowLayout = [3, 3, 3]
-  else if (n === 10) rowLayout = [4, 3, 3]
-  else if (n === 11) rowLayout = [4, 4, 3]
-  else if (n === 12) rowLayout = [4, 4, 4]
-  else if (n === 13) rowLayout = [4, 3, 3, 3]
-  else if (n === 14) rowLayout = [4, 4, 3, 3]
-  else if (n === 15) rowLayout = [4, 4, 4, 3]
-  else if (n === 16) rowLayout = [4, 4, 4, 4]
-  else {
-    // For very large numbers: try to make a square-ish grid
-    const cols = Math.ceil(Math.sqrt(n))
-    rowLayout = []
-    let remaining = n
-    while (remaining > 0) {
-      const take = Math.min(cols, remaining)
-      rowLayout.push(take)
-      remaining -= take
-    }
-  }
+  // Number of columns for the CSS grid
+  let cols
+  if      (n === 1)  cols = 1
+  else if (n === 2)  cols = 2
+  else if (n === 3)  cols = 3
+  else if (n === 4)  cols = 4   // 4 people: single row of 4, all square
+  else if (n <= 6)   cols = 3
+  else if (n <= 9)   cols = 3
+  else if (n <= 12)  cols = 4
+  else if (n <= 16)  cols = 4
+  else               cols = Math.ceil(Math.sqrt(n))
 
-  // Clear the grid completely
+  // On mobile cap at 2 columns so tiles stay large enough to see
+  if (isMobile && cols > 2) cols = 2
+
+  // Apply CSS grid directly on videoGrid
+  videoGrid.style.display             = "grid"
+  videoGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
+  videoGrid.style.gridAutoRows        = "1fr"
+  videoGrid.style.alignItems          = "stretch"
+  videoGrid.style.justifyItems        = "stretch"
+
+  // Move all tiles into videoGrid directly (no .grid-row wrappers needed)
   videoGrid.innerHTML = ""
-
-  // Rebuild: create one .grid-row div per row, put tiles into them
-  let tileIndex = 0
-  rowLayout.forEach(count => {
-    const row = document.createElement("div")
-    row.className = "grid-row"
-
-    // For the last row with fewer tiles, centre them by adding flex justify
-    if (count < rowLayout[0]) {
-      row.style.justifyContent = "center"
-      // Each tile in a short row should not stretch to fill full width
-      // Give them a max-width matching what a full row tile would be
-      const tileMaxWidth = `calc(${(100 / rowLayout[0]).toFixed(2)}% - 8px)`
-      for (let i = 0; i < count; i++) {
-        const tile = tiles[tileIndex++]
-        if (!tile) return
-        tile.style.maxWidth = tileMaxWidth
-        row.appendChild(tile)
-      }
-    } else {
-      for (let i = 0; i < count; i++) {
-        const tile = tiles[tileIndex++]
-        if (!tile) return
-        tile.style.maxWidth = ""
-        row.appendChild(tile)
-      }
-    }
-
-    videoGrid.appendChild(row)
+  tiles.forEach(tile => {
+    tile.style.maxWidth = ""
+    tile.style.width    = "100%"
+    tile.style.height   = "100%"
+    videoGrid.appendChild(tile)
   })
 }
+
+// Re-layout on resize (handles orientation change on mobile too)
+window.addEventListener("resize", () => { if (tileStore.length) updateGridLayout() })
 
 function startTimer() {
   callStartTime = Date.now()

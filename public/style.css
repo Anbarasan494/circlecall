@@ -530,22 +530,29 @@ body.room .logo-wordmark {
 /* ── Video grid ─────────────────────────────────────────────────────────────── */
 #video-grid {
   flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
+  display: grid;
   gap: 6px; padding: 8px;
   background: #0a0b0e;
   overflow: hidden;
+  align-content: center;
+  justify-content: center;
+  /* Default 1-col; JS sets grid-template-columns & grid-auto-rows at runtime */
+  grid-template-columns: 1fr;
+  grid-auto-rows: 1fr;
 }
 
+/* .grid-row kept for backward safety — treated as invisible pass-through */
 .grid-row {
-  display: flex; flex: 1; gap: 6px; min-height: 0;
+  display: contents;
 }
 
 .video-wrapper {
   position: relative;
   background: var(--ink-900);
   border-radius: var(--r-md);
-  overflow: hidden; flex: 1;
-  min-width: 0; min-height: 0;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 1 / 1;       /* ← always square */
   border: 1px solid rgba(14,165,233,0.1);
   transition: border-color 0.3s, box-shadow 0.3s;
 }
@@ -1051,7 +1058,6 @@ body.room .logo-wordmark {
   .ctrl-btn { min-width: 50px; padding: 7px 8px; }
   .ctrl-label { display: none; }
   #video-grid { padding: 6px; gap: 6px; }
-  .grid-row { gap: 6px; }
   .home-card { width: 92vw; padding: 30px 22px; }
   .modal-box { width: 92vw; padding: 32px 22px; }
   .ss-pip { width: 130px; bottom: 70px; right: 12px; }
