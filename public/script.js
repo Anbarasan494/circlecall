@@ -334,8 +334,14 @@ socket.on("request-cam-on", () => {
 socket.on("screen-share-started", sharerId => {
   if (sharerId === myPeerId) return
   showToast(`${usernames[sharerId] || "Someone"} is sharing their screen`, "info")
-  // Slight delay so the remote peer's replaceTrack propagates first
-  setTimeout(() => mountRemoteScreenShare(sharerId, usernames[sharerId]), 600)
+  // Give replaceTrack a moment to propagate before reading the stream
+  setTimeout(() => {
+    const tile  = tileStore.find(t => t.dataset.uid === sharerId)
+    const vid   = tile?.querySelector("video")
+    if (vid?.srcObject) {
+      enterPresentationMode(vid.srcObject, null, sharerId, usernames[sharerId])
+    }
+  }, 700)
 })
 
 socket.on("screen-share-stopped", sharerId => {
@@ -396,7 +402,7 @@ function leave() {
 }
 */
 // ─────────────────────────────────────────────────────────────────────────────
-//  Screen share  —  Google Meet style (main view + thumbnail strip)
+//  Screen share  —  LEFT: participant thumbnails  |  RIGHT: shared screen
 // ─────────────────────────────────────────────────────────────────────────────
 async function toggleScreenShare() {
   if (isScreenSharing) { stopScreenShare(); return }
@@ -409,7 +415,7 @@ async function toggleScreenShare() {
     isScreenSharing = true
     const screenTrack = screenStream.getVideoTracks()[0]
 
-    // Replace the video track in every peer connection so remote peers see the screen
+    // Push screen track to every peer connection
     for (const pid in peers) {
       const pc     = peers[pid].call?.peerConnection
       const sender = pc?.getSenders().find(s => s.track?.kind === "video")
@@ -418,16 +424,15 @@ async function toggleScreenShare() {
 
     socket.emit("screen-share-started")
 
-    // Switch the meeting layout to presentation mode
-    enterPresentationMode(screenStream, "local", username)
+    // Enter presentation layout: thumbnails LEFT, screen RIGHT
+    enterPresentationMode(screenStream, myStream, "local", username)
 
-    // When the OS/browser stop-share button is clicked
+    // Browser's native "Stop sharing" button also cleans up
     screenTrack.onended = stopScreenShare
 
     const btn = document.getElementById("btn-screen")
     btn.classList.add("ctrl-btn--active")
     btn.querySelector(".ctrl-label").textContent = "Stop Share"
-
   } catch {
     showToast("Screen share cancelled or unavailable", "info")
   }
@@ -439,7 +444,7 @@ function stopScreenShare() {
   screenStream    = null
   isScreenSharing = false
 
-  // Restore each peer connection's camera track
+  // Restore camera track in every peer connection
   const camTrack = myStream?.getVideoTracks()[0]
   for (const pid in peers) {
     const pc     = peers[pid].call?.peerConnection
@@ -455,95 +460,103 @@ function stopScreenShare() {
   btn.querySelector(".ctrl-label").textContent = "Share"
 }
 
-// ── Presentation layout (replaces fullscreen overlay) ────────────────────────
-// Google Meet style: large screen-share on the left, thumbnail strip on the right
+// ── Build presentation layout ─────────────────────────────────────────────────
+// Structure inside .video-area:
+//   [top-bar]
+//   [#ss-presentation-wrap]
+//     [#ss-thumb-col]   ← LEFT: all participant tiles + sharer's camera
+//     [#ss-screen-col]  ← RIGHT: the shared screen
+//   [.controls]
 
-let _ssMainVideo = null   // the <video> showing the shared screen
-
-function enterPresentationMode(screenSrc, sharerId, sharerName) {
-  exitPresentationMode()   // clean slate
+function enterPresentationMode(screenSrc, camSrc, sharerId, sharerName) {
+  exitPresentationMode()   // always start clean
 
   const videoArea = document.querySelector(".video-area")
-  videoArea.classList.add("presentation-mode")
+  videoArea.classList.add("ss-active")
 
-  // ── Left: main screen-share panel ──
-  const mainPanel = document.createElement("div")
-  mainPanel.id = "ss-main-panel"
+  // ── Wrapper that sits between top-bar and controls ──
+  const wrap = document.createElement("div")
+  wrap.id = "ss-presentation-wrap"
 
-  _ssMainVideo = makeVideoEl(true)
-  _ssMainVideo.id = "ss-main-video"
-  _ssMainVideo.srcObject = screenSrc
-  safePlay(_ssMainVideo)
-  mainPanel.appendChild(_ssMainVideo)
+  // ─── LEFT column: thumbnail strip ───────────────────
+  const thumbCol = document.createElement("div")
+  thumbCol.id = "ss-thumb-col"
 
-  const label = document.createElement("div")
-  label.className = "ss-label"
-  label.textContent = `${sharerName || usernames[sharerId] || "Someone"} is presenting`
-  mainPanel.appendChild(label)
-
-  // ── Right: thumbnail strip (re-uses existing tileStore tiles) ──
-  const strip = document.createElement("div")
-  strip.id = "ss-thumb-strip"
-
-  // Move all existing video tiles into the strip
+  // Move every existing tile into the thumb strip
   tileStore.forEach(tile => {
-    tile.classList.add("ss-thumb")
-    strip.appendChild(tile)
+    tile.classList.add("ss-thumb-tile")
+    thumbCol.appendChild(tile)
   })
 
-  // Insert both panels before the controls bar
-  const controls = videoArea.querySelector(".controls")
-  videoArea.insertBefore(strip, controls)
-  videoArea.insertBefore(mainPanel, strip)
+  // If the sharer's camera stream exists and they are local, add a dedicated cam tile
+  if (camSrc && sharerId === "local") {
+    const camWrap = document.createElement("div")
+    camWrap.id = "ss-cam-tile"
+    camWrap.classList.add("ss-thumb-tile")
 
-  // Hide the original video grid
+    const camVid = makeVideoEl(true)   // muted — it's your own mic
+    camVid.srcObject = camSrc
+    safePlay(camVid)
+    camWrap.appendChild(camVid)
+
+    const camTag = document.createElement("div")
+    camTag.className = "name-tag"
+    camTag.textContent = (sharerName || username || "You") + " (cam)"
+    camWrap.appendChild(camTag)
+
+    thumbCol.appendChild(camWrap)
+  }
+
+  // ─── RIGHT column: shared screen ────────────────────
+  const screenCol = document.createElement("div")
+  screenCol.id = "ss-screen-col"
+
+  const screenVid = makeVideoEl(true)
+  screenVid.id = "ss-screen-video"
+  screenVid.srcObject = screenSrc
+  safePlay(screenVid)
+  screenCol.appendChild(screenVid)
+
+  const label = document.createElement("div")
+  label.className = "ss-presenter-label"
+  label.textContent = `${sharerName || usernames[sharerId] || "Someone"} is presenting`
+  screenCol.appendChild(label)
+
+  // ── Assemble and inject before controls ──
+  wrap.appendChild(thumbCol)
+  wrap.appendChild(screenCol)
+
+  const controls = videoArea.querySelector(".controls")
+  videoArea.insertBefore(wrap, controls)
+
+  // Hide the normal video grid (tiles are now in the thumb strip)
   videoGrid.style.display = "none"
 }
 
 function exitPresentationMode() {
   const videoArea = document.querySelector(".video-area")
-  videoArea.classList.remove("presentation-mode")
+  videoArea.classList.remove("ss-active")
 
-  // Remove presentation panels
-  document.getElementById("ss-main-panel")?.remove()
-  const strip = document.getElementById("ss-thumb-strip")
-  if (strip) {
-    // Move tiles back to videoGrid
+  const wrap = document.getElementById("ss-presentation-wrap")
+  if (wrap) {
+    // Return all tiles to the video grid
     tileStore.forEach(tile => {
-      tile.classList.remove("ss-thumb")
+      tile.classList.remove("ss-thumb-tile")
       videoGrid.appendChild(tile)
     })
-    strip.remove()
+    // Remove the dedicated cam tile (clone — not in tileStore)
+    document.getElementById("ss-cam-tile")?.remove()
+    wrap.remove()
   }
 
-  // Restore the grid
+  // Restore grid
   videoGrid.style.display = "grid"
   updateGridLayout()
-
-  _ssMainVideo = null
 }
 
-// ── Remote peer started sharing — show their stream in presentation mode ──────
-function mountRemoteScreenShare(sharerId, sharerName) {
-  // The remote peer's screen arrives through their existing peer connection.
-  // We already have a tile for them; their video element's srcObject will be
-  // updated automatically via replaceTrack on their side.
-  // We create a fresh <video> that mirrors their tile's srcObject.
-  const existingTile  = tileStore.find(t => t.dataset.uid === sharerId)
-  const existingVideo = existingTile?.querySelector("video")
-  if (!existingVideo?.srcObject) return
-
-  // Clone the stream into a dedicated presentation video element
-  const clone = makeVideoEl(false)
-  clone.srcObject = existingVideo.srcObject
-
-  // Build a temporary screen-stream-like object so enterPresentationMode works
-  enterPresentationMode(existingVideo.srcObject, sharerId, sharerName)
-}
-
-// Legacy aliases kept for socket event handlers
+// ── Remote peer started sharing ───────────────────────────────────────────────
 function mountScreenShareUI(screenSrc, camSrc, sharerId, sharerName) {
-  enterPresentationMode(screenSrc, sharerId, sharerName)
+  enterPresentationMode(screenSrc, camSrc, sharerId, sharerName)
 }
 function unmountScreenShareUI() {
   exitPresentationMode()
@@ -754,76 +767,41 @@ function copyRoomCode() {
 }
 
 function updateGridLayout() {
-  // Read from tileStore — the single source of truth for all tiles
   const tiles = tileStore
   const n = tiles.length
   if (n === 0) return
 
-  // Determine row layout — how many tiles per row
-  // Rules: each row must be full (or last row centred), tiles fill screen evenly
-  let rowLayout  // array of counts per row e.g. [2,2,1] for 5 people
+  const isMobile = window.innerWidth <= 700
 
-  if      (n === 1)  rowLayout = [1]
-  else if (n === 2)  rowLayout = [2]
-  else if (n === 3)  rowLayout = [3]
-  else if (n === 4)  rowLayout = [2, 2]
-  else if (n === 5)  rowLayout = [3, 2]
-  else if (n === 6)  rowLayout = [3, 3]
-  else if (n === 7)  rowLayout = [4, 3]
-  else if (n === 8)  rowLayout = [4, 4]
-  else if (n === 9)  rowLayout = [3, 3, 3]
-  else if (n === 10) rowLayout = [4, 3, 3]
-  else if (n === 11) rowLayout = [4, 4, 3]
-  else if (n === 12) rowLayout = [4, 4, 4]
-  else if (n === 13) rowLayout = [4, 3, 3, 3]
-  else if (n === 14) rowLayout = [4, 4, 3, 3]
-  else if (n === 15) rowLayout = [4, 4, 4, 3]
-  else if (n === 16) rowLayout = [4, 4, 4, 4]
-  else {
-    // For very large numbers: try to make a square-ish grid
-    const cols = Math.ceil(Math.sqrt(n))
-    rowLayout = []
-    let remaining = n
-    while (remaining > 0) {
-      const take = Math.min(cols, remaining)
-      rowLayout.push(take)
-      remaining -= take
-    }
-  }
+  let cols
+  if      (n === 1)  cols = 1
+  else if (n === 2)  cols = 2
+  else if (n === 3)  cols = 3
+  else if (n === 4)  cols = 4
+  else if (n <= 6)   cols = 3
+  else if (n <= 9)   cols = 3
+  else if (n <= 12)  cols = 4
+  else if (n <= 16)  cols = 4
+  else               cols = Math.ceil(Math.sqrt(n))
 
-  // Clear the grid completely
+  if (isMobile && cols > 2) cols = 2
+
+  videoGrid.style.display             = "grid"
+  videoGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
+  videoGrid.style.gridAutoRows        = "1fr"
+  videoGrid.style.alignItems          = "stretch"
+  videoGrid.style.justifyItems        = "stretch"
+
   videoGrid.innerHTML = ""
-
-  // Rebuild: create one .grid-row div per row, put tiles into them
-  let tileIndex = 0
-  rowLayout.forEach(count => {
-    const row = document.createElement("div")
-    row.className = "grid-row"
-
-    // For the last row with fewer tiles, centre them by adding flex justify
-    if (count < rowLayout[0]) {
-      row.style.justifyContent = "center"
-      // Each tile in a short row should not stretch to fill full width
-      // Give them a max-width matching what a full row tile would be
-      const tileMaxWidth = `calc(${(100 / rowLayout[0]).toFixed(2)}% - 8px)`
-      for (let i = 0; i < count; i++) {
-        const tile = tiles[tileIndex++]
-        if (!tile) return
-        tile.style.maxWidth = tileMaxWidth
-        row.appendChild(tile)
-      }
-    } else {
-      for (let i = 0; i < count; i++) {
-        const tile = tiles[tileIndex++]
-        if (!tile) return
-        tile.style.maxWidth = ""
-        row.appendChild(tile)
-      }
-    }
-
-    videoGrid.appendChild(row)
+  tiles.forEach(tile => {
+    tile.style.maxWidth = ""
+    tile.style.width    = "100%"
+    tile.style.height   = "100%"
+    videoGrid.appendChild(tile)
   })
 }
+
+window.addEventListener("resize", () => { if (tileStore.length) updateGridLayout() })
 
 function startTimer() {
   callStartTime = Date.now()

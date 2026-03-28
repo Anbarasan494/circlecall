@@ -530,22 +530,25 @@ body.room .logo-wordmark {
 /* ── Video grid ─────────────────────────────────────────────────────────────── */
 #video-grid {
   flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
+  display: grid;
   gap: 6px; padding: 8px;
   background: #0a0b0e;
   overflow: hidden;
+  align-content: center;
+  justify-content: center;
+  grid-template-columns: 1fr;
+  grid-auto-rows: 1fr;
 }
 
-.grid-row {
-  display: flex; flex: 1; gap: 6px; min-height: 0;
-}
+.grid-row { display: contents; }
 
 .video-wrapper {
   position: relative;
   background: var(--ink-900);
   border-radius: var(--r-md);
-  overflow: hidden; flex: 1;
-  min-width: 0; min-height: 0;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 1 / 1;
   border: 1px solid rgba(14,165,233,0.1);
   transition: border-color 0.3s, box-shadow 0.3s;
 }
@@ -989,35 +992,60 @@ body.room .logo-wordmark {
 .ap-action:hover { filter: brightness(1.08); }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   SCREEN-SHARE — Google Meet style presentation layout
+   SCREEN-SHARE PRESENTATION LAYOUT
+   LEFT column  → participant thumbnails + sharer's cam
+   RIGHT column → the shared screen
 ══════════════════════════════════════════════════════════════════════════════ */
 
-/* When in presentation mode the video-area switches to a 3-column layout:
-   [main screen panel] [thumb strip] — controls stay pinned at the bottom */
-.video-area.presentation-mode {
+/* When screen-share is active the video-area switches to a side-by-side layout */
+.video-area.ss-active {
+  flex-direction: column;   /* top-bar, wrap, controls stacked */
+}
+
+/* The wrap fills all space between top-bar and controls */
+#ss-presentation-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
-  align-items: stretch;
+  overflow: hidden;
+  background: #0a0b0e;
 }
 
-/* The top-bar still spans full width */
-.video-area.presentation-mode .top-bar {
-  width: 100%;
+/* ── LEFT: thumbnail strip ── */
+#ss-thumb-col {
+  width: 190px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 6px;
+  background: #0d0e12;
+  border-right: 1px solid rgba(14,165,233,0.12);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
-/* Controls still span full width at the bottom */
-.video-area.presentation-mode .controls {
-  width: 100%;
-  flex-shrink: 0;
-  order: 99;
+/* Each thumbnail tile in the left strip */
+.ss-thumb-tile {
+  width: 100% !important;
+  aspect-ratio: 1 / 1 !important;
+  height: auto !important;
+  flex-shrink: 0 !important;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  position: relative;
+  background: var(--ink-900);
+  border: 1px solid rgba(14,165,233,0.15);
+}
+.ss-thumb-tile video {
+  width: 100%; height: 100%; object-fit: cover; display: block;
 }
 
-/* Main screen-share panel — fills remaining space */
-#ss-main-panel {
+/* ── RIGHT: shared screen ── */
+#ss-screen-col {
   flex: 1;
   min-width: 0;
-  min-height: 0;
   position: relative;
   background: #000;
   display: flex;
@@ -1026,79 +1054,57 @@ body.room .logo-wordmark {
   overflow: hidden;
 }
 
-#ss-main-video {
+#ss-screen-video {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
 }
 
-/* Presenter label */
-.ss-label {
+/* Presenter label badge */
+.ss-presenter-label {
   position: absolute;
   top: 14px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(8, 9, 10, 0.75);
+  background: rgba(8, 9, 10, 0.78);
   backdrop-filter: blur(8px);
   border: 1px solid rgba(56, 189, 248, 0.25);
   color: rgba(255, 255, 255, 0.9);
-  padding: 6px 18px;
+  padding: 5px 16px;
   border-radius: var(--r-pill);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
   pointer-events: none;
-  z-index: 10;
+  z-index: 5;
 }
 
-/* Thumbnail strip — right column */
-#ss-thumb-strip {
-  width: 200px;
-  flex-shrink: 0;
-  background: #0a0b0e;
-  border-left: 1px solid rgba(14, 165, 233, 0.12);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 6px;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-/* Each thumbnail tile in the strip */
-.video-wrapper.ss-thumb {
-  width: 100% !important;
-  height: auto !important;
-  aspect-ratio: 1 / 1 !important;
-  flex: none !important;
-  min-height: 0;
-}
-
-/* ── Mobile: stack vertically ── */
+/* ── Mobile: stack vertically (thumbnails on top, screen below) ── */
 @media (max-width: 700px) {
-  .video-area.presentation-mode {
+  #ss-presentation-wrap {
     flex-direction: column;
   }
-  #ss-main-panel {
-    flex: 1;
-    min-height: 0;
+  #ss-thumb-col {
     width: 100%;
-  }
-  #ss-thumb-strip {
-    width: 100%;
-    height: 110px;
-    border-left: none;
-    border-top: 1px solid rgba(14, 165, 233, 0.12);
+    height: 120px;
     flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid rgba(14,165,233,0.12);
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 4px 6px;
+    padding: 6px;
+    gap: 6px;
   }
-  .video-wrapper.ss-thumb {
-    width: 90px !important;
-    height: 90px !important;
+  .ss-thumb-tile {
+    width: 100px !important;
+    height: 100px !important;
+    aspect-ratio: unset !important;
     flex-shrink: 0 !important;
+  }
+  #ss-screen-col {
+    flex: 1;
+    min-height: 0;
   }
 }
 
