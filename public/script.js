@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  CircleCall — client  (full rewrite with all features)
+//  CircleCall — client  (all fixes applied)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const socket = io("/", {
@@ -31,14 +31,14 @@ let pinnedId        = null
 let chatUnread      = 0
 let _ssVisCleanup   = null
 let _audioCtx       = null
-let _analyserNodes  = {}
+const _analyserNodes = {}
+let waitingList      = {}
 
 const peers       = {}
 const usernames   = {}
 const mediaState  = {}
 const pendingCalls = []
 const tileStore   = []
-let waitingList   = {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PeerJS
@@ -80,9 +80,9 @@ function answerCall(call) {
     if (!peers[call.peer]) peers[call.peer] = { call, added: false }
     peers[call.peer].added = true
     addVideoTile(call.peer, video, remoteStream, usernames[call.peer])
-    attachSpeakingDetector(call.peer, remoteStream)
+    _attachAnalyser(call.peer, remoteStream)
   })
-  call.on("close", () => removeVideoTile(call.peer))
+  call.on("close", () => { _detachAnalyser(call.peer); removeVideoTile(call.peer) })
   call.on("error", e => console.warn("inbound call error:", e))
 }
 
@@ -106,26 +106,6 @@ function safePlay(v) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  SVG icons (professional — no emoji in buttons)
-// ─────────────────────────────────────────────────────────────────────────────
-const SVG = {
-  micOn:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
-  micOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
-  camOn:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`,
-  camOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/></svg>`,
-  share:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><polyline points="8 21 12 17 16 21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
-  people: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
-  chat:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
-  leave:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`,
-  send:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
-  pin:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6.5-1.5 1.5-2-5-4 4 5 2-1.5 1.5 4 4 1.5-1.5 2 5 4-4-5-2 1.5-1.5z"/><line x1="2" y1="22" x2="9.5" y2="14.5"/></svg>`,
-  unpin:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="m15 6.5-1.5 1.5-2-5-4 4 5 2-1.5 1.5 4 4 1.5-1.5"/><line x1="2" y1="22" x2="9.5" y2="14.5"/></svg>`,
-  check:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
-  close:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
-  kick:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="17" y1="8" x2="23" y2="14"/><line x1="23" y1="8" x2="17" y2="14"/></svg>`,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  enterRoom
 // ─────────────────────────────────────────────────────────────────────────────
 function enterRoom() {
@@ -145,7 +125,7 @@ function enterRoom() {
       myStream = stream
       myVideo  = makeVideoEl(true)
       addVideoTile("local", myVideo, stream, username)
-      attachLocalSpeakingDetector()
+      _attachLocalAnalyser()
       streamReady = true
       drainPendingCalls()
       startTimer()
@@ -162,6 +142,7 @@ function enterRoom() {
 // ─────────────────────────────────────────────────────────────────────────────
 function addVideoTile(id, video, stream, name) {
   if (tileStore.find(t => t.dataset.uid === id)) return
+
   video.srcObject = stream
   safePlay(video)
 
@@ -169,7 +150,7 @@ function addVideoTile(id, video, stream, name) {
   wrapper.classList.add("video-wrapper")
   wrapper.dataset.uid = id
 
-  // Avatar initials (shown when camera off)
+  // Avatar initials — shown when camera is off
   const av = document.createElement("div")
   av.className = "tile-avatar"
   av.textContent = (name || "?")[0].toUpperCase()
@@ -184,18 +165,18 @@ function addVideoTile(id, video, stream, name) {
   tag.textContent = name || usernames[id] || "Guest"
   wrapper.appendChild(tag)
 
-  // Status icons
+  // Status icons (SVG — no emoji)
   const icons = document.createElement("div")
   icons.className = "tile-status"
-  icons.innerHTML = `<span class="ts-mic">${SVG.micOn}</span><span class="ts-cam">${SVG.camOn}</span>`
+  icons.innerHTML = `<span class="ts-mic" title="Mic">${SVG.micOn}</span><span class="ts-cam" title="Camera">${SVG.camOn}</span>`
   wrapper.appendChild(icons)
 
-  // Speaking ring
+  // Speaking indicator — centred circle glow (not border)
   const ring = document.createElement("div")
   ring.className = "speaking-ring"
   wrapper.appendChild(ring)
 
-  // Pin overlay (hover)
+  // Pin overlay on hover
   const pinOv = document.createElement("div")
   pinOv.className = "pin-overlay"
   pinOv.innerHTML = `<button class="pin-btn">${SVG.pin}<span>Pin</span></button>`
@@ -207,7 +188,7 @@ function addVideoTile(id, video, stream, name) {
 }
 
 function removeVideoTile(id) {
-  detachSpeakingDetector(id)
+  _detachAnalyser(id)
   const idx = tileStore.findIndex(t => t.dataset.uid === id)
   if (idx !== -1) tileStore.splice(idx, 1)
   try { peers[id]?.call?.close() } catch {}
@@ -224,7 +205,7 @@ function setTileStatus(id, micOn, camOn) {
   const cam = w.querySelector(".ts-cam")
   if (mic) mic.innerHTML = micOn ? SVG.micOn : SVG.micOff
   if (cam) cam.innerHTML = camOn ? SVG.camOn : SVG.camOff
-  // Show avatar when cam is off
+  // Show avatar when cam off
   const av  = w.querySelector(".tile-avatar")
   const vid = w.querySelector("video")
   if (av)  av.style.display  = camOn ? "none"  : "flex"
@@ -232,7 +213,23 @@ function setTileStatus(id, micOn, camOn) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Pinning
+//  SVG icon set — professional, no emoji in buttons/tiles
+// ─────────────────────────────────────────────────────────────────────────────
+const SVG = {
+  micOn:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+  micOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+  camOn:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>`,
+  camOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/></svg>`,
+  pin:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="m15 6.5-1.5 1.5-2-5-4 4 5 2-1.5 1.5 4 4 1.5-1.5 2 5 4-4-5-2 1.5-1.5z"/><line x1="2" y1="22" x2="9.5" y2="14.5"/></svg>`,
+  unpin:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><line x1="1" y1="1" x2="23" y2="23"/><path d="m15 6.5-1.5 1.5-2-5-4 4 5 2-1.5 1.5"/><line x1="2" y1="22" x2="9.5" y2="14.5"/></svg>`,
+  share:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><polyline points="8 21 12 17 16 21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+  check:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+  xmark:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  kick:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="17" y1="8" x2="23" y2="14"/><line x1="23" y1="8" x2="17" y2="14"/></svg>`,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Pin / spotlight
 // ─────────────────────────────────────────────────────────────────────────────
 function togglePin(id) {
   pinnedId = (pinnedId === id) ? null : id
@@ -247,51 +244,45 @@ function togglePin(id) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Grid layout
+//  Grid layout — CSS grid, square tiles, respects pin + split window
 // ─────────────────────────────────────────────────────────────────────────────
 function updateGridLayout() {
   const n = tileStore.length
   if (n === 0) return
-  const isMobile = window.innerWidth <= 700
 
+  // Use element width for accurate split-window behaviour
+  const w = videoGrid.offsetWidth || window.innerWidth
+  const isMobile = w <= 600
+
+  // Pinned layout: big tile + sidebar strip
   if (pinnedId && n > 1) {
-    // Pinned layout: main + sidebar strip
-    videoGrid.innerHTML = ""
     videoGrid.style.display = "flex"
     videoGrid.style.flexDirection = isMobile ? "column" : "row"
     videoGrid.style.gridTemplateColumns = ""
-    videoGrid.style.gridTemplateRows    = ""
+    videoGrid.innerHTML = ""
 
     const pinned = tileStore.find(t => t.dataset.uid === pinnedId)
     const others = tileStore.filter(t => t.dataset.uid !== pinnedId)
 
     if (pinned) {
-      pinned.style.flex = "1"
-      pinned.style.aspectRatio = ""
-      pinned.style.width = "100%"
-      pinned.style.height = isMobile ? "calc(100% - 126px)" : "100%"
-      pinned.style.minWidth = "0"
+      pinned.style.flex = "1"; pinned.style.aspectRatio = ""; pinned.style.minWidth = "0"
+      pinned.style.width = "100%"; pinned.style.height = isMobile ? "calc(100% - 126px)" : "100%"
       videoGrid.appendChild(pinned)
     }
-
     const strip = document.createElement("div")
-    strip.className = "pin-strip"
     strip.style.cssText = isMobile
-      ? "display:flex;flex-direction:row;gap:6px;overflow-x:auto;padding:4px 6px;height:120px;flex-shrink:0;"
-      : "display:flex;flex-direction:column;gap:6px;overflow-y:auto;padding:6px 4px;width:190px;flex-shrink:0;"
+      ? "display:flex;flex-direction:row;gap:5px;overflow-x:auto;padding:4px 5px;height:120px;flex-shrink:0;background:#0a0b0e"
+      : "display:flex;flex-direction:column;gap:5px;overflow-y:auto;padding:5px 4px;width:180px;flex-shrink:0;background:#0a0b0e"
     others.forEach(t => {
-      t.style.flex        = ""
-      t.style.width       = isMobile ? "100px" : "100%"
-      t.style.height      = isMobile ? "100px" : "auto"
-      t.style.aspectRatio = "1/1"
-      t.style.flexShrink  = "0"
+      t.style.flex = ""; t.style.width = isMobile ? "100px" : "100%"
+      t.style.height = isMobile ? "100px" : "auto"; t.style.aspectRatio = "1/1"; t.style.flexShrink = "0"
       strip.appendChild(t)
     })
     videoGrid.appendChild(strip)
     return
   }
 
-  // Normal CSS grid
+  // Normal grid
   let cols
   if      (n === 1) cols = 1
   else if (n === 2) cols = 2
@@ -303,23 +294,50 @@ function updateGridLayout() {
   else              cols = Math.ceil(Math.sqrt(n))
   if (isMobile && cols > 2) cols = 2
 
-  videoGrid.style.display             = "grid"
-  videoGrid.style.flexDirection       = ""
+  videoGrid.style.display = "grid"
+  videoGrid.style.flexDirection = ""
   videoGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
-  videoGrid.style.gridTemplateRows    = ""
-  videoGrid.innerHTML                 = ""
+  videoGrid.style.gridAutoRows = "1fr"
+  videoGrid.style.gridTemplateRows = ""
+  videoGrid.innerHTML = ""
 
   tileStore.forEach(t => {
-    t.style.flex        = ""
-    t.style.width       = "100%"
-    t.style.height      = "100%"
-    t.style.aspectRatio = "1/1"
-    t.style.flexShrink  = ""
+    t.style.flex = ""; t.style.width = "100%"; t.style.height = "100%"
+    t.style.aspectRatio = "1/1"; t.style.flexShrink = ""
     videoGrid.appendChild(t)
   })
 }
 
 window.addEventListener("resize", () => { if (tileStore.length) updateGridLayout() })
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Speaking detection — ring around centre, not tile border
+// ─────────────────────────────────────────────────────────────────────────────
+function _getAudioCtx() {
+  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+  return _audioCtx
+}
+function _attachLocalAnalyser() { if (myStream) _attachAnalyser("local", myStream) }
+function _attachAnalyser(id, stream) {
+  try {
+    const ctx = _getAudioCtx()
+    const src = ctx.createMediaStreamSource(stream)
+    const an  = ctx.createAnalyser()
+    an.fftSize = 512; an.smoothingTimeConstant = 0.3
+    src.connect(an)
+    const data = new Uint8Array(an.frequencyBinCount)
+    const iv = setInterval(() => {
+      an.getByteFrequencyData(data)
+      const vol = data.reduce((a, b) => a + b, 0) / data.length
+      const tile = tileStore.find(t => t.dataset.uid === id)
+      if (tile) tile.classList.toggle("speaking", vol > 12)
+    }, 100)
+    _analyserNodes[id] = { iv }
+  } catch(e) {}
+}
+function _detachAnalyser(id) {
+  if (_analyserNodes[id]) { clearInterval(_analyserNodes[id].iv); delete _analyserNodes[id] }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  callPeer — outbound
@@ -335,41 +353,11 @@ function callPeer(id, name) {
     if (peers[id]?.added) return
     peers[id].added = true
     addVideoTile(id, video, remoteStream, name || usernames[id])
-    attachSpeakingDetector(id, remoteStream)
+    _attachAnalyser(id, remoteStream)
     rerenderParticipants()
   })
-  call.on("close", () => removeVideoTile(id))
+  call.on("close", () => { _detachAnalyser(id); removeVideoTile(id) })
   call.on("error", e => console.warn("outbound call error:", e))
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Speaking detection
-// ─────────────────────────────────────────────────────────────────────────────
-function getAudioCtx() {
-  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-  return _audioCtx
-}
-function attachLocalSpeakingDetector() { if (myStream) _attachAnalyser("local", myStream) }
-function attachSpeakingDetector(id, stream) { _attachAnalyser(id, stream) }
-function _attachAnalyser(id, stream) {
-  try {
-    const ctx = getAudioCtx()
-    const src = ctx.createMediaStreamSource(stream)
-    const an  = ctx.createAnalyser()
-    an.fftSize = 512; an.smoothingTimeConstant = 0.3
-    src.connect(an)
-    const data = new Uint8Array(an.frequencyBinCount)
-    const interval = setInterval(() => {
-      an.getByteFrequencyData(data)
-      const vol = data.reduce((a, b) => a + b, 0) / data.length
-      const tile = tileStore.find(t => t.dataset.uid === id)
-      if (tile) tile.classList.toggle("speaking", vol > 12)
-    }, 100)
-    _analyserNodes[id] = { interval }
-  } catch(e) {}
-}
-function detachSpeakingDetector(id) {
-  if (_analyserNodes[id]) { clearInterval(_analyserNodes[id].interval); delete _analyserNodes[id] }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -390,8 +378,7 @@ socket.on("existing-users", (users, isHost, hId) => {
 
 socket.on("user-connected", (id, name) => {
   usernames[id] = name; mediaState[id] = { micOn: true, camOn: true }
-  showToast(`${name} joined`, "success")
-  callPeer(id, name)
+  showToast(`${name} joined`, "success"); callPeer(id, name)
 })
 socket.on("user-disconnected", id => { showToast(`${usernames[id] || "Someone"} left`); removeVideoTile(id) })
 
@@ -417,7 +404,6 @@ socket.on("meeting-ended", () => {
   showToast("Meeting ended by host", "info")
   setTimeout(() => window.location.href = "/", 1500)
 })
-
 socket.on("participants-update", (list, hId) => {
   hostId = hId
   list.forEach(p => {
@@ -435,6 +421,7 @@ socket.on("request-unmute", () => showActionPrompt("Host asked you to unmute.", 
 socket.on("force-cam-off",  () => { applyCamOff(true); showToast("Host turned off your camera", "info") })
 socket.on("request-cam-on", () => showActionPrompt("Host asked you to turn on camera.", "Turn on", () => applyCamOff(false)))
 
+// Screen share — remote
 socket.on("screen-share-started", sharerId => {
   if (sharerId === myPeerId) return
   showToast(`${usernames[sharerId] || "Someone"} is sharing their screen`, "info")
@@ -442,12 +429,14 @@ socket.on("screen-share-started", sharerId => {
     const tile = tileStore.find(t => t.dataset.uid === sharerId)
     const vid  = tile?.querySelector("video")
     if (vid?.srcObject) enterPresentationMode(vid.srcObject, sharerId, usernames[sharerId])
-  }, 700)
+  }, 600)
 })
 socket.on("screen-share-stopped", sharerId => {
-  showToast(`${usernames[sharerId] || "Someone"} stopped sharing`, "info"); exitPresentationMode()
+  showToast(`${usernames[sharerId] || "Someone"} stopped sharing`, "info")
+  exitPresentationMode()
 })
 
+// Chat
 socket.on("chat-message", (message, senderName) => {
   appendMessage(senderName, message, false)
   if (activePanel !== "chat") {
@@ -498,20 +487,25 @@ function toggleCamera() { applyCamOff(!isCameraOff) }
 function leave() {
   if (isScreenSharing) stopScreenShare()
   myStream?.getTracks().forEach(t => t.stop())
-  Object.values(_analyserNodes).forEach(n => clearInterval(n.interval))
+  Object.values(_analyserNodes).forEach(n => clearInterval(n.iv))
   socket.disconnect()
   window.location.href = "/"
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Screen share
+//  Screen share — inline layout, no position:fixed, works in split windows
+//  Structure inside .video-area.ss-active:
+//    [top-bar]
+//    [#ss-wrap  flex-row]
+//      [#ss-thumbs]  LEFT  : participant tiles (camera, not screen)
+//      [#ss-main]    RIGHT : shared screen + blank overlay
+//    [.controls]
 // ─────────────────────────────────────────────────────────────────────────────
 async function toggleScreenShare() {
   if (isScreenSharing) { stopScreenShare(); return }
 
   if (!navigator.mediaDevices?.getDisplayMedia) {
-    showToast("Screen sharing not supported on this browser/device.", "error", 4000)
-    return
+    showToast("Screen sharing not supported on this browser.", "error", 4000); return
   }
 
   try {
@@ -519,11 +513,13 @@ async function toggleScreenShare() {
     isScreenSharing = true
     const screenTrack = screenStream.getVideoTracks()[0]
 
+    // Send screen to peers — local tile stays on camera
     for (const pid in peers) {
       const pc     = peers[pid].call?.peerConnection
       const sender = pc?.getSenders().find(s => s.track?.kind === "video")
       if (sender) sender.replaceTrack(screenTrack)
     }
+    if (myVideo) { myVideo.srcObject = myStream; safePlay(myVideo) }
 
     socket.emit("screen-share-started")
     enterPresentationMode(screenStream, "local", username)
@@ -540,6 +536,7 @@ function stopScreenShare() {
   if (!screenStream) return
   screenStream.getTracks().forEach(t => t.stop())
   screenStream = null; isScreenSharing = false
+
   if (_ssVisCleanup) { _ssVisCleanup(); _ssVisCleanup = null }
 
   const camTrack = myStream?.getVideoTracks()[0]
@@ -548,73 +545,75 @@ function stopScreenShare() {
     const sender = pc?.getSenders().find(s => s.track?.kind === "video")
     if (sender && camTrack) sender.replaceTrack(camTrack)
   }
+  if (myVideo) { myVideo.srcObject = myStream; safePlay(myVideo) }
+
   socket.emit("screen-share-stopped")
   exitPresentationMode()
+
   const btn = document.getElementById("btn-screen")
   if (btn) { btn.classList.remove("ctrl-btn--active"); btn.querySelector(".ctrl-label").textContent = "Share" }
 }
 
 function enterPresentationMode(screenSrc, sharerId, sharerName) {
   exitPresentationMode()
+
   const videoArea = document.querySelector(".video-area")
   videoArea.classList.add("ss-active")
 
   const wrap = document.createElement("div")
-  wrap.id = "ss-presentation-wrap"
+  wrap.id = "ss-wrap"
 
-  // LEFT: thumbnail strip (existing tiles, no duplicate)
-  const thumbCol = document.createElement("div")
-  thumbCol.id = "ss-thumb-col"
-  tileStore.forEach(tile => { tile.classList.add("ss-thumb-tile"); thumbCol.appendChild(tile) })
+  // LEFT: thumbnails — existing tiles (no duplicate cam tile)
+  const thumbs = document.createElement("div")
+  thumbs.id = "ss-thumbs"
+  tileStore.forEach(tile => { tile.classList.add("ss-thumb"); thumbs.appendChild(tile) })
 
   // RIGHT: screen
-  const screenCol = document.createElement("div")
-  screenCol.id = "ss-screen-col"
-  const screenVid = makeVideoEl(true)
-  screenVid.id = "ss-screen-video"
-  screenVid.srcObject = screenSrc
-  safePlay(screenVid)
-  screenCol.appendChild(screenVid)
+  const main = document.createElement("div")
+  main.id = "ss-main"
 
-  const presLabel = document.createElement("div")
-  presLabel.className = "ss-presenter-label"
-  presLabel.textContent = `${sharerName || usernames[sharerId] || "Someone"} is presenting`
-  screenCol.appendChild(presLabel)
+  const vid = makeVideoEl(true)
+  vid.id = "ss-screen-vid"
+  vid.srcObject = screenSrc
+  safePlay(vid)
+  main.appendChild(vid)
 
-  // Blank overlay when sharer is on meeting tab
+  const lbl = document.createElement("div")
+  lbl.className = "ss-badge"
+  lbl.textContent = `${sharerName || usernames[sharerId] || "Someone"} is presenting`
+  main.appendChild(lbl)
+
+  // Blank overlay (shown when sharer's tab is focused — tab capture would show the meeting)
   const blank = document.createElement("div")
-  blank.id = "ss-blank-overlay"
-  blank.innerHTML = `<div class="ss-blank-inner"><div class="ss-blank-icon">${SVG.share}</div><p class="ss-blank-title">Screen paused</p><p class="ss-blank-sub">Switch to another window so participants can see your screen</p></div>`
-  screenCol.appendChild(blank)
+  blank.id = "ss-blank"
+  blank.innerHTML = `<div class="ss-blank-box">${SVG.share}<p class="ss-blank-title">Screen paused</p><p class="ss-blank-sub">Switch to another window so<br>participants can see your screen</p></div>`
+  main.appendChild(blank)
 
-  wrap.appendChild(thumbCol)
-  wrap.appendChild(screenCol)
-  videoArea.insertBefore(wrap, videoArea.querySelector(".controls"))
+  wrap.appendChild(thumbs)
+  wrap.appendChild(main)
+
+  const controls = videoArea.querySelector(".controls")
+  videoArea.insertBefore(wrap, controls)
   videoGrid.style.display = "none"
 
-  if (sharerId === "local") _startBlankWatcher()
+  if (sharerId === "local") {
+    const syncBlank = () => blank.classList.toggle("ss-blank--visible", !document.hidden)
+    syncBlank()
+    document.addEventListener("visibilitychange", syncBlank)
+    _ssVisCleanup = () => document.removeEventListener("visibilitychange", syncBlank)
+  }
 }
 
 function exitPresentationMode() {
   if (_ssVisCleanup) { _ssVisCleanup(); _ssVisCleanup = null }
   document.querySelector(".video-area")?.classList.remove("ss-active")
-  const wrap = document.getElementById("ss-presentation-wrap")
+  const wrap = document.getElementById("ss-wrap")
   if (wrap) {
-    tileStore.forEach(tile => { tile.classList.remove("ss-thumb-tile"); videoGrid.appendChild(tile) })
+    tileStore.forEach(tile => { tile.classList.remove("ss-thumb"); videoGrid.appendChild(tile) })
     wrap.remove()
   }
-  videoGrid.style.display = "grid"
+  videoGrid.style.display = ""
   updateGridLayout()
-}
-
-function _startBlankWatcher() {
-  function sync() {
-    const b = document.getElementById("ss-blank-overlay")
-    if (b) b.classList.toggle("ss-blank-visible", !document.hidden)
-  }
-  sync()
-  document.addEventListener("visibilitychange", sync)
-  _ssVisCleanup = () => document.removeEventListener("visibilitychange", sync)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -634,6 +633,7 @@ function togglePanel(name) {
     if (badge) badge.style.display = "none"
   }
 }
+
 function closePanel() {
   document.getElementById("side-panel").classList.remove("open")
   activePanel = null
@@ -642,7 +642,7 @@ function closePanel() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Participants panel
+//  Participants panel — icon buttons, admit in panel, waiting list
 // ─────────────────────────────────────────────────────────────────────────────
 let lastParticipantList = []
 
@@ -661,7 +661,7 @@ function rerenderParticipants(list) {
   count.textContent = all.length + Object.keys(waitingList).length
   ul.innerHTML = ""
 
-  // Waiting section (host only)
+  // Waiting users (host only)
   if (amHost && Object.keys(waitingList).length > 0) {
     const wh = document.createElement("li")
     wh.className = "panel-section-header"
@@ -674,21 +674,14 @@ function rerenderParticipants(list) {
       li.innerHTML = `
         <div class="p-row">
           <div class="p-avatar" style="background:${avatarColor(wName)}">${(wName[0]||"?").toUpperCase()}</div>
-          <div class="p-info">
-            <span class="p-name">${escapeHtml(wName)}</span>
-            <span class="p-sub">Waiting to join…</span>
-          </div>
+          <div class="p-info"><span class="p-name">${escapeHtml(wName)}</span><span class="p-sub">Waiting…</span></div>
           <div class="p-actions">
             <button class="icon-btn icon-btn--green" title="Admit">${SVG.check}</button>
-            <button class="icon-btn icon-btn--red"   title="Deny">${SVG.close}</button>
+            <button class="icon-btn icon-btn--red"   title="Deny">${SVG.xmark}</button>
           </div>
         </div>`
-      li.querySelector(".icon-btn--green").onclick = () => {
-        socket.emit("approve-user", wId); delete waitingList[wId]; rerenderParticipants()
-      }
-      li.querySelector(".icon-btn--red").onclick = () => {
-        socket.emit("deny-user", wId); delete waitingList[wId]; rerenderParticipants()
-      }
+      li.querySelector(".icon-btn--green").onclick = () => { socket.emit("approve-user", wId); delete waitingList[wId]; rerenderParticipants() }
+      li.querySelector(".icon-btn--red").onclick   = () => { socket.emit("deny-user",    wId); delete waitingList[wId]; rerenderParticipants() }
       ul.appendChild(li)
     })
 
@@ -698,14 +691,12 @@ function rerenderParticipants(list) {
     ul.appendChild(dv)
   }
 
-  // Active participants
   all.forEach(p => {
     const isHost = p.id === hostId
     const li = document.createElement("li")
     li.className = "participant-item"
-
-    const micIco = `<span class="p-icon ${p.micOn ? "p-icon--on":"p-icon--off"}" title="${p.micOn?"Mic on":"Muted"}">${p.micOn ? SVG.micOn : SVG.micOff}</span>`
-    const camIco = `<span class="p-icon ${p.camOn ? "p-icon--on":"p-icon--off"}" title="${p.camOn?"Cam on":"Cam off"}">${p.camOn ? SVG.camOn : SVG.camOff}</span>`
+    const micIco = `<span class="p-icon ${p.micOn?"p-icon--on":"p-icon--off"}">${p.micOn?SVG.micOn:SVG.micOff}</span>`
+    const camIco = `<span class="p-icon ${p.camOn?"p-icon--on":"p-icon--off"}">${p.camOn?SVG.camOn:SVG.camOff}</span>`
 
     li.innerHTML = `
       <div class="p-row">
@@ -720,17 +711,14 @@ function rerenderParticipants(list) {
     if (amHost && !p.isSelf) {
       const ad = li.querySelector(`#hc-${p.id}`)
       const mb = document.createElement("button")
-      mb.className = "icon-btn"; mb.title = p.micOn ? "Mute" : "Unmute"; mb.innerHTML = p.micOn ? SVG.micOn : SVG.micOff
-      mb.onclick = () => socket.emit(p.micOn ? "host-mute-user" : "host-unmute-user", p.id)
-
+      mb.className = "icon-btn"; mb.title = p.micOn?"Mute":"Unmute"; mb.innerHTML = p.micOn?SVG.micOn:SVG.micOff
+      mb.onclick = () => socket.emit(p.micOn?"host-mute-user":"host-unmute-user", p.id)
       const cb = document.createElement("button")
-      cb.className = "icon-btn"; cb.title = p.camOn ? "Stop cam" : "Start cam"; cb.innerHTML = p.camOn ? SVG.camOn : SVG.camOff
-      cb.onclick = () => socket.emit(p.camOn ? "host-cam-off" : "host-cam-on", p.id)
-
+      cb.className = "icon-btn"; cb.title = p.camOn?"Stop cam":"Start cam"; cb.innerHTML = p.camOn?SVG.camOn:SVG.camOff
+      cb.onclick = () => socket.emit(p.camOn?"host-cam-off":"host-cam-on", p.id)
       const kb = document.createElement("button")
       kb.className = "icon-btn icon-btn--red"; kb.title = "Remove"; kb.innerHTML = SVG.kick
       kb.onclick = () => confirm(`Remove ${p.username}?`) && socket.emit("kick-user", p.id)
-
       ad.append(mb, cb, kb)
     }
     ul.appendChild(li)
@@ -762,9 +750,9 @@ function hideWaitingScreen() {
 }
 
 function showAdmitCard(id, name) {
-  let container = document.getElementById("admit-container")
-  if (!container) { container = document.createElement("div"); container.id = "admit-container"; document.body.appendChild(container) }
-  if (container.querySelector(`[data-uid="${id}"]`)) return
+  let c = document.getElementById("admit-container")
+  if (!c) { c = document.createElement("div"); c.id = "admit-container"; document.body.appendChild(c) }
+  if (c.querySelector(`[data-uid="${id}"]`)) return
   const card = document.createElement("div")
   card.className = "admit-card"; card.dataset.uid = id
   card.innerHTML = `
@@ -778,7 +766,7 @@ function showAdmitCard(id, name) {
     </div>`
   card.querySelector(".admit-allow").onclick = () => { socket.emit("approve-user", id); delete waitingList[id]; card.remove(); rerenderParticipants() }
   card.querySelector(".admit-deny").onclick  = () => { socket.emit("deny-user",    id); delete waitingList[id]; card.remove(); rerenderParticipants() }
-  container.appendChild(card)
+  c.appendChild(card)
 }
 
 function showActionPrompt(message, btnLabel, action) {
@@ -801,16 +789,18 @@ function sendMessage() {
   appendMessage(username, msg, true)
   inp.value = ""
 }
+
 function appendMessage(sender, text, isSelf) {
   const ul = document.getElementById("messages")
   if (!ul) return
   const li = document.createElement("li")
   li.classList.add("msg-item", isSelf ? "msg-self" : "msg-other")
   const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  li.innerHTML = `<span class="msg-sender">${isSelf ? "You" : escapeHtml(sender)}</span><span class="msg-text">${escapeHtml(text)}</span><span class="msg-time">${time}</span>`
+  li.innerHTML = `<span class="msg-sender">${isSelf?"You":escapeHtml(sender)}</span><span class="msg-text">${escapeHtml(text)}</span><span class="msg-time">${time}</span>`
   ul.appendChild(li)
   ul.scrollTop = ul.scrollHeight
 }
+
 function escapeHtml(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
 }
@@ -825,20 +815,22 @@ function showToast(message, type = "info", duration = 3000) {
   t.className = `toast--show toast--${type}`
   if (duration > 0) setTimeout(() => { t.className = "" }, duration)
 }
+
 function copyRoomCode() {
   navigator.clipboard.writeText(roomId).then(() => showToast("Room code copied!", "success"))
 }
+
 function startTimer() {
   callStartTime = Date.now()
   timerInterval = setInterval(() => {
     const s = Math.floor((Date.now() - callStartTime) / 1000)
     const el = document.getElementById("call-timer")
-    if (el) el.textContent = `${String(Math.floor(s / 60)).padStart(2,"0")}:${String(s % 60).padStart(2,"0")}`
+    if (el) el.textContent = `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`
   }, 1000)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  DOMContentLoaded — wire up SVG icons into control buttons
+//  DOMContentLoaded — wire SVG icons into control buttons
 // ─────────────────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   const display = document.getElementById("room-code-display")
@@ -847,20 +839,22 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("name-input")?.addEventListener("keydown", e => e.key === "Enter" && enterRoom())
   document.getElementById("chat_message")?.addEventListener("keydown", e => e.key === "Enter" && sendMessage())
 
-  // Set SVG icons on control buttons
-  const iconMap = {
-    "btn-mute":   { icon: SVG.micOn,  label: "Mute",   active: true  },
-    "btn-camera": { icon: SVG.camOn,  label: "Camera", active: true  },
-    "btn-screen": { icon: SVG.share,  label: "Share",  active: false },
-    "btn-people": { icon: SVG.people, label: null,     active: false },
-    "btn-chat":   { icon: SVG.chat,   label: null,     active: false },
-    "btn-leave":  { icon: SVG.leave,  label: "Leave",  active: false },
+  // Inject SVG icons into control buttons (replaces emoji spans)
+  const btnCfg = {
+    "btn-mute":   { svg: SVG.micOn,  label: "Mute",   active: true  },
+    "btn-camera": { svg: SVG.camOn,  label: "Camera", active: true  },
+    "btn-screen": { svg: SVG.share,  label: "Share",  active: false },
+    "btn-people": { svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`, label: null, active: false },
+    "btn-chat":   { svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`, label: null, active: false },
   }
-  Object.entries(iconMap).forEach(([id, cfg]) => {
+  Object.entries(btnCfg).forEach(([id, cfg]) => {
     const btn = document.getElementById(id)
     if (!btn) return
-    const iconEl = btn.querySelector(".ctrl-icon")
-    if (iconEl) iconEl.innerHTML = cfg.icon
+    const ic = btn.querySelector(".ctrl-icon")
+    if (ic) ic.innerHTML = cfg.svg
     if (cfg.active) btn.classList.add("ctrl-btn--active")
   })
+  // Leave button SVG
+  const leaveBtn = document.querySelector(".leave-btn .ctrl-icon")
+  if (leaveBtn) leaveBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`
 })

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>CircleCall Meeting</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -75,7 +75,7 @@
       <!-- Video grid -->
       <div id="video-grid"></div>
 
-      <!-- Controls -->
+      <!-- Controls — SVG icons injected by script.js on DOMContentLoaded -->
       <div class="controls">
         <button id="btn-mute" class="ctrl-btn ctrl-btn--active" onclick="toggleMute()">
           <span class="ctrl-icon"></span>
@@ -98,7 +98,7 @@
           <span class="ctrl-label">Chat</span>
           <span id="chat-badge" class="chat-badge" style="display:none">0</span>
         </button>
-        <button id="btn-leave" class="ctrl-btn leave-btn" onclick="leave()">
+        <button class="ctrl-btn leave-btn" onclick="leave()">
           <span class="ctrl-icon"></span>
           <span class="ctrl-label">Leave</span>
         </button>
