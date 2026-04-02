@@ -151,11 +151,15 @@ function addVideoTile(id, video, stream, name) {
   wrapper.dataset.uid = id
 
   // Avatar initials — shown when camera is off
+  const color = avatarColor(name || "")
   const av = document.createElement("div")
   av.className = "tile-avatar"
   av.textContent = (name || "?")[0].toUpperCase()
-  av.style.background = avatarColor(name || "")
+  av.style.background = color
   wrapper.appendChild(av)
+
+  // Store avatar color as CSS var so the speaking ring can use it
+  wrapper.style.setProperty("--avatar-color", color)
 
   wrapper.appendChild(video)
 
@@ -443,7 +447,7 @@ socket.on("chat-message", (message, senderName) => {
     chatUnread++
     const badge = document.getElementById("chat-badge")
     if (badge) { badge.textContent = chatUnread; badge.style.display = "flex" }
-    showToast(`${senderName}: ${message.slice(0, 40)}`, "info", 3000)
+    // No toast — badge on the button is enough
   }
 })
 

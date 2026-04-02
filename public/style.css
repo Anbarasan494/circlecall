@@ -588,23 +588,33 @@ body.room .logo-wordmark {
 }
 .tile-status span svg { width: 13px; height: 13px; }
 
-/* Speaking ring — centred circle, NOT border glow */
+/* Speaking ring — centred circle using the person's avatar colour */
 .speaking-ring {
   position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  width: 54px; height: 54px; border-radius: 50%;
+  width: 58px; height: 58px; border-radius: 50%;
   pointer-events: none; z-index: 6;
   border: 3px solid transparent;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
 .video-wrapper.speaking .speaking-ring {
-  border-color: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34,197,94,0.25), 0 0 18px rgba(34,197,94,0.5);
-  animation: speakRing 0.7s ease-in-out infinite alternate;
+  border-color: var(--avatar-color, #22c55e);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--avatar-color, #22c55e) 25%, transparent),
+    0 0 18px color-mix(in srgb, var(--avatar-color, #22c55e) 50%, transparent);
+  animation: speakRing 0.65s ease-in-out infinite alternate;
 }
 @keyframes speakRing {
-  from { box-shadow: 0 0 0 3px rgba(34,197,94,0.2),  0 0 10px rgba(34,197,94,0.4); }
-  to   { box-shadow: 0 0 0 6px rgba(34,197,94,0.35), 0 0 22px rgba(34,197,94,0.6); }
+  from {
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--avatar-color, #22c55e) 20%, transparent),
+      0 0 10px color-mix(in srgb, var(--avatar-color, #22c55e) 40%, transparent);
+  }
+  to {
+    box-shadow:
+      0 0 0 6px color-mix(in srgb, var(--avatar-color, #22c55e) 35%, transparent),
+      0 0 22px color-mix(in srgb, var(--avatar-color, #22c55e) 60%, transparent);
+  }
 }
 
 /* Pin overlay — appears on hover */
@@ -955,37 +965,96 @@ body.room .logo-wordmark {
 .ss-blank-sub { font-size: 12px; color: rgba(255,255,255,0.3); line-height: 1.7; }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   RESPONSIVE — mobile-first, two breakpoints
+   RESPONSIVE — mobile-first
+   Key principles:
+   • meeting-container fills 100dvh (dynamic viewport height — handles mobile
+     browser chrome disappearing on scroll)
+   • Controls bar always visible at bottom, never wraps off-screen
+   • Video grid fills remaining space, tiles square
+   • Side panel overlays from bottom (sheet pattern)
+   • All touch targets ≥ 44px
 ══════════════════════════════════════════════════════════════════════════════ */
 
-/* ── ≤700px: tablet / split window ── */
+/* Use dynamic viewport height everywhere it matters */
+body.room {
+  height: 100dvh;
+  height: 100vh; /* fallback */
+}
+.meeting-container {
+  height: 100dvh;
+  height: 100vh; /* fallback */
+}
+
+/* ── ≤700px: tablet portrait / split window / large phone landscape ── */
 @media (max-width: 700px) {
+
+  /* Stack video above controls — no side-by-side */
   .meeting-container { flex-direction: column; }
 
-  /* Side panel slides up from bottom */
+  /* Side panel: bottom sheet, overlays on top */
   .side-panel {
-    position: fixed; bottom: 0; left: 0; right: 0; width: 100%;
-    border-left: none; border-top: 2px solid rgba(14,165,233,0.3);
-    max-height: 55vh; z-index: 200;
-    border-radius: var(--r-lg) var(--r-lg) 0 0;
-    box-shadow: 0 -8px 40px rgba(0,0,0,0.5);
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    width: 100%;
+    max-height: 60dvh;
+    max-height: 60vh;
+    min-height: 0;
+    border-left: none;
+    border-top: 2px solid rgba(14,165,233,0.35);
+    border-radius: 18px 18px 0 0;
+    z-index: 300;
+    box-shadow: 0 -12px 48px rgba(0,0,0,0.6);
+    animation: sheetUp 0.22s cubic-bezier(0.32,0.72,0,1);
+  }
+  @keyframes sheetUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
   }
 
-  /* Controls scroll horizontally */
-  .controls { gap: 5px; padding: 8px 10px; justify-content: flex-start; }
-  .ctrl-btn { min-width: 50px; padding: 8px 9px; }
+  /* Controls: single horizontal row, always fully visible, no wrapping */
+  .controls {
+    gap: 5px;
+    padding: 8px 8px env(safe-area-inset-bottom, 8px);
+    justify-content: space-around;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .controls::-webkit-scrollbar { display: none; }
 
-  #video-grid { padding: 4px; gap: 4px; }
+  .ctrl-btn {
+    min-width: 48px;
+    padding: 8px 6px;
+    flex-shrink: 0;
+    gap: 3px;
+  }
+  .ctrl-icon { width: 20px; height: 20px; }
+  .ctrl-icon svg { width: 18px; height: 18px; }
+  .ctrl-label { font-size: 9px; }
 
+  /* Video grid fills all remaining space with no wasted padding */
+  #video-grid {
+    padding: 4px;
+    gap: 4px;
+    /* grid fills the flex column between top-bar and controls */
+    min-height: 0;
+    flex: 1;
+  }
+
+  /* Home / modal */
   .home-card { width: 92vw; padding: 28px 20px; }
   .modal-box { width: 92vw; padding: 30px 20px; }
 
-  /* Screen share stacks vertically */
+  /* Screen share: thumbnails on top, screen fills the rest */
   #ss-wrap { flex-direction: column; }
   #ss-thumbs {
-    width: 100%; height: 110px; flex-direction: row;
-    border-right: none; border-bottom: 1px solid rgba(14,165,233,0.12);
-    overflow-x: auto; overflow-y: hidden; padding: 5px 6px; gap: 5px;
+    width: 100%; height: 108px;
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid rgba(14,165,233,0.12);
+    overflow-x: auto; overflow-y: hidden;
+    padding: 5px 6px; gap: 5px;
   }
   .ss-thumb {
     width: 90px !important; height: 90px !important;
@@ -993,31 +1062,66 @@ body.room .logo-wordmark {
   }
   #ss-main { flex: 1; min-height: 0; }
 
-  /* Admit cards above controls */
-  #admit-container { top: auto; bottom: 90px; right: 8px; left: 8px; }
+  /* Admit cards above the controls bar */
+  #admit-container {
+    top: auto; bottom: 80px;
+    right: 8px; left: 8px;
+  }
   .admit-card { width: 100%; }
+
+  /* Toast sits above controls */
+  #toast { bottom: 76px; }
 }
 
-/* ── ≤480px: phone ── */
+/* ── ≤480px: phone portrait (primary mobile target) ── */
 @media (max-width: 480px) {
+
+  /* Compact top bar */
   .top-bar { height: 44px; padding: 0 10px; gap: 6px; }
-  .call-timer { font-size: 10px; }
-  .logo-wordmark.xs { display: none; }
+  .logo-wordmark.xs { display: none; } /* save space */
   .host-badge { font-size: 10px; padding: 2px 7px; }
+  .call-timer { font-size: 10px; letter-spacing: 0.08em; }
+  .room-pill { padding: 4px 8px 4px 8px; }
+  .room-pill-code { font-size: 10px; }
 
-  .ctrl-btn { min-width: 44px; padding: 7px 8px; }
+  /* Even smaller controls so all 6 buttons fit without scrolling */
+  .ctrl-btn {
+    min-width: 42px;
+    padding: 7px 4px;
+  }
   .ctrl-icon { width: 18px; height: 18px; }
-  .ctrl-icon svg { width: 16px; height: 16px; }
-  .ctrl-label { font-size: 9px; }
+  .ctrl-icon svg { width: 17px; height: 17px; }
+  .ctrl-label { font-size: 8px; letter-spacing: 0; }
 
+  /* Tighter grid */
   #video-grid { padding: 3px; gap: 3px; }
 
-  .side-panel { max-height: 62vh; }
+  /* 1 column when alone, 2 max for multiple (enforced by JS too) */
+  .side-panel { max-height: 65dvh; max-height: 65vh; }
+
+  /* Smaller modals on very small screens */
   .home-card { width: 96vw; padding: 22px 16px; }
   .modal-box { width: 96vw; padding: 26px 16px; }
+  .modal-title { font-size: 20px; }
 
-  #ss-thumbs { height: 88px; }
-  .ss-thumb { width: 74px !important; height: 74px !important; }
+  /* Thinner screen-share thumbnail strip */
+  #ss-thumbs { height: 86px; }
+  .ss-thumb { width: 72px !important; height: 72px !important; }
+
+  /* Speaking ring slightly smaller on phone */
+  .speaking-ring { width: 48px; height: 48px; }
+
+  /* Name tag shorter to avoid overflow */
+  .name-tag { font-size: 10px; padding: 2px 7px; }
+}
+
+/* ── Landscape phone — extra care: height is tiny ── */
+@media (max-height: 420px) and (orientation: landscape) {
+  .top-bar { height: 36px; }
+  .controls { padding: 5px 8px; gap: 4px; }
+  .ctrl-btn { padding: 5px 6px; min-width: 40px; }
+  .ctrl-label { display: none; } /* hide labels, icons only */
+  #video-grid { padding: 3px; gap: 3px; }
 }
 
 /* Scrollbar global */
