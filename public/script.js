@@ -106,7 +106,97 @@ function safePlay(v) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  enterRoom
+//  Notes — shared per-session, downloadable as PDF on meeting end
+// ─────────────────────────────────────────────────────────────────────────────
+let notesContent = ""
+
+function toggleNotes() {
+  togglePanel("notes")
+}
+
+function downloadNotesPDF() {
+  const text = document.getElementById("notes-area")?.value || notesContent
+  if (!text.trim()) { showToast("Notes are empty", "info"); return }
+
+  // Build a simple printable HTML page and trigger print-to-PDF
+  const win = window.open("", "_blank")
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>CircleCall Meeting Notes</title>
+    <style>
+      body { font-family: 'Segoe UI', sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #111; line-height: 1.7; }
+      h1 { font-size: 22px; border-bottom: 2px solid #0ea5e9; padding-bottom: 10px; color: #0369a1; }
+      .meta { color: #6b7280; font-size: 13px; margin-bottom: 24px; }
+      pre { white-space: pre-wrap; font-family: inherit; font-size: 15px; background: #f0f9ff; padding: 20px; border-radius: 8px; border-left: 4px solid #38bdf8; }
+    </style></head><body>
+    <h1>Meeting Notes — CircleCall</h1>
+    <p class="meta">Room: ${roomId.toUpperCase()} &nbsp;·&nbsp; ${new Date().toLocaleString()}</p>
+    <pre>${escapeHtml(text)}</pre>
+    <script>window.onload=()=>{window.print();}<\/script>
+    </body></html>`)
+  win.document.close()
+}
+
+// Broadcast notes changes to all participants via chat channel
+socket.on("notes-update", (newContent) => {
+  notesContent = newContent
+  const area = document.getElementById("notes-area")
+  if (area && document.activeElement !== area) area.value = newContent
+})
+
+function broadcastNotes() {
+  const area = document.getElementById("notes-area")
+  if (!area) return
+  notesContent = area.value
+  socket.emit("notes-update", roomId, notesContent)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Pre-join preview — mic/camera toggles before entering the room
+// ─────────────────────────────────────────────────────────────────────────────
+let previewStream = null
+let previewMuted  = false
+let previewCamOff = false
+
+async function initPreview() {
+  const preview = document.getElementById("preview-video")
+  const micBtn  = document.getElementById("preview-mic-btn")
+  const camBtn  = document.getElementById("preview-cam-btn")
+  if (!preview) return
+
+  try {
+    previewStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    preview.srcObject = previewStream
+    preview.muted = true
+    safePlay(preview)
+  } catch(e) {
+    // Camera/mic not available — that's fine, still allow joining
+    document.getElementById("preview-avatar")?.classList.remove("hidden")
+    if (preview) preview.style.display = "none"
+  }
+
+  micBtn?.addEventListener("click", () => {
+    previewMuted = !previewMuted
+    const track = previewStream?.getAudioTracks()[0]
+    if (track) track.enabled = !previewMuted
+    micBtn.classList.toggle("preview-btn--off", previewMuted)
+    micBtn.querySelector(".preview-btn-icon").innerHTML = previewMuted ? SVG.micOff : SVG.micOn
+    micBtn.querySelector(".preview-btn-label").textContent = previewMuted ? "Unmuted" : "Muted"
+  })
+
+  camBtn?.addEventListener("click", () => {
+    previewCamOff = !previewCamOff
+    const track = previewStream?.getVideoTracks()[0]
+    if (track) track.enabled = !previewCamOff
+    preview.style.display  = previewCamOff ? "none" : "block"
+    document.getElementById("preview-avatar")?.classList.toggle("hidden", !previewCamOff)
+    camBtn.classList.toggle("preview-btn--off", previewCamOff)
+    camBtn.querySelector(".preview-btn-icon").innerHTML = previewCamOff ? SVG.camOff : SVG.camOn
+    camBtn.querySelector(".preview-btn-label").textContent = previewCamOff ? "Cam Off" : "Cam On"
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  enterRoom — uses previewStream if available
 // ─────────────────────────────────────────────────────────────────────────────
 function enterRoom() {
   const inp  = document.getElementById("name-input")
@@ -120,21 +210,51 @@ function enterRoom() {
   document.getElementById("meeting-ui").style.display = "flex"
   document.getElementById("room-id-label").textContent = roomId
 
-  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+  // Re-use the preview stream if we already have it
+  const streamPromise = previewStream
+    ? Promise.resolve(previewStream)
+    : navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+
+  streamPromise
     .then(stream => {
       myStream = stream
-      myVideo  = makeVideoEl(true)
+      // Apply pre-join mute/cam state
+      if (previewMuted)  { const t = stream.getAudioTracks()[0]; if (t) t.enabled = false }
+      if (previewCamOff) { const t = stream.getVideoTracks()[0]; if (t) t.enabled = false }
+
+      myVideo = makeVideoEl(true)
       addVideoTile("local", myVideo, stream, username)
+      // Reflect pre-join state immediately on local tile
+      setTileStatus("local", !previewMuted, !previewCamOff)
+      isMuted     = previewMuted
+      isCameraOff = previewCamOff
+      _syncControlButtons()
       _attachLocalAnalyser()
       streamReady = true
       drainPendingCalls()
       startTimer()
       tryJoin()
+      previewStream = null
     })
     .catch(err => {
       console.error("getUserMedia:", err)
       showToast("Camera/mic denied — check browser permissions", "error")
     })
+}
+
+function _syncControlButtons() {
+  const muteBtn = document.getElementById("btn-mute")
+  const camBtn  = document.getElementById("btn-camera")
+  if (muteBtn) {
+    muteBtn.classList.toggle("ctrl-btn--active", !isMuted)
+    muteBtn.classList.toggle("ctrl-btn--muted",   isMuted)
+    muteBtn.querySelector(".ctrl-icon").innerHTML = isMuted ? SVG.micOff : SVG.micOn
+  }
+  if (camBtn) {
+    camBtn.classList.toggle("ctrl-btn--active", !isCameraOff)
+    camBtn.classList.toggle("ctrl-btn--muted",   isCameraOff)
+    camBtn.querySelector(".ctrl-icon").innerHTML = isCameraOff ? SVG.camOff : SVG.camOn
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,15 +271,11 @@ function addVideoTile(id, video, stream, name) {
   wrapper.dataset.uid = id
 
   // Avatar initials — shown when camera is off
-  const color = avatarColor(name || "")
   const av = document.createElement("div")
   av.className = "tile-avatar"
   av.textContent = (name || "?")[0].toUpperCase()
-  av.style.background = color
+  av.style.background = avatarColor(name || "")
   wrapper.appendChild(av)
-
-  // Store avatar color as CSS var so the speaking ring can use it
-  wrapper.style.setProperty("--avatar-color", color)
 
   wrapper.appendChild(video)
 
@@ -205,15 +321,33 @@ function removeVideoTile(id) {
 function setTileStatus(id, micOn, camOn) {
   const w = tileStore.find(t => t.dataset.uid === id)
   if (!w) return
-  const mic = w.querySelector(".ts-mic")
-  const cam = w.querySelector(".ts-cam")
-  if (mic) mic.innerHTML = micOn ? SVG.micOn : SVG.micOff
-  if (cam) cam.innerHTML = camOn ? SVG.camOn : SVG.camOff
-  // Show avatar when cam off
-  const av  = w.querySelector(".tile-avatar")
-  const vid = w.querySelector("video")
+  const mic  = w.querySelector(".ts-mic")
+  const cam  = w.querySelector(".ts-cam")
+  const av   = w.querySelector(".tile-avatar")
+  const vid  = w.querySelector("video")
+  const ring = w.querySelector(".speaking-ring")
+
+  // Show avatar (initials) only when camera is off
   if (av)  av.style.display  = camOn ? "none"  : "flex"
   if (vid) vid.style.display = camOn ? "block" : "none"
+
+  // When camera is ON: hide all status icons — the live video speaks for itself
+  // When camera is OFF: show mic icon so people know if they can be heard
+  const showIcons = !camOn
+  if (mic) {
+    mic.innerHTML = micOn ? SVG.micOn : SVG.micOff
+    mic.style.display = showIcons ? "flex" : "none"
+  }
+  if (cam) {
+    cam.style.display = "none" // never show cam icon — redundant with video/avatar
+  }
+
+  // Speaking ring only visible when cam is off (on the avatar circle)
+  if (ring) ring.style.display = camOn ? "none" : ""
+
+  // Update muted indicator on name tag
+  const tag = w.querySelector(".name-tag")
+  if (tag) tag.classList.toggle("name-tag--muted", !micOn)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,6 +364,8 @@ const SVG = {
   check:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
   xmark:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
   kick:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="17" y1="8" x2="23" y2="14"/><line x1="23" y1="8" x2="17" y2="14"/></svg>`,
+  notes:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
+  download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -406,8 +542,36 @@ socket.on("you-were-kicked", () => {
 })
 socket.on("meeting-ended", () => {
   showToast("Meeting ended by host", "info")
-  setTimeout(() => window.location.href = "/", 1500)
+  const area = document.getElementById("notes-area")
+  const hasNotes = (area?.value || notesContent || "").trim()
+  if (hasNotes) {
+    // Give user a moment to download notes before leaving
+    showNoteDownloadPrompt()
+    setTimeout(() => window.location.href = "/", 12000)
+  } else {
+    setTimeout(() => window.location.href = "/", 1500)
+  }
 })
+
+function showNoteDownloadPrompt() {
+  const d = document.createElement("div")
+  d.className = "note-end-prompt"
+  d.innerHTML = `
+    <div class="nep-inner">
+      <div class="nep-icon">${SVG.notes}</div>
+      <h3>Meeting ended</h3>
+      <p>The host has ended this meeting.<br>Download your notes before leaving?</p>
+      <div class="nep-btns">
+        <button class="nep-download" onclick="downloadNotesPDF();this.closest('.note-end-prompt').remove();setTimeout(()=>location.href='/',1500)">
+          ${SVG.download} Download Notes PDF
+        </button>
+        <button class="nep-skip" onclick="this.closest('.note-end-prompt').remove();window.location.href='/'">
+          Leave without saving
+        </button>
+      </div>
+    </div>`
+  document.body.appendChild(d)
+}
 socket.on("participants-update", (list, hId) => {
   hostId = hId
   list.forEach(p => {
@@ -447,7 +611,7 @@ socket.on("chat-message", (message, senderName) => {
     chatUnread++
     const badge = document.getElementById("chat-badge")
     if (badge) { badge.textContent = chatUnread; badge.style.display = "flex" }
-    // No toast — badge on the button is enough
+    // No toast — badge on Chat button is sufficient
   }
 })
 
@@ -629,12 +793,19 @@ function togglePanel(name) {
   document.getElementById("side-panel").classList.add("open")
   document.getElementById("panel-participants").style.display = name === "participants" ? "flex" : "none"
   document.getElementById("panel-chat").style.display         = name === "chat"         ? "flex" : "none"
+  document.getElementById("panel-notes").style.display        = name === "notes"        ? "flex" : "none"
   document.getElementById("btn-people").classList.toggle("ctrl-btn--active", name === "participants")
   document.getElementById("btn-chat").classList.toggle("ctrl-btn--active",   name === "chat")
+  document.getElementById("btn-notes").classList.toggle("ctrl-btn--active",  name === "notes")
   if (name === "chat") {
     chatUnread = 0
     const badge = document.getElementById("chat-badge")
     if (badge) badge.style.display = "none"
+  }
+  if (name === "notes") {
+    // Sync latest notes into textarea
+    const area = document.getElementById("notes-area")
+    if (area && notesContent) area.value = notesContent
   }
 }
 
@@ -643,6 +814,7 @@ function closePanel() {
   activePanel = null
   document.getElementById("btn-people").classList.remove("ctrl-btn--active")
   document.getElementById("btn-chat").classList.remove("ctrl-btn--active")
+  document.getElementById("btn-notes")?.classList.remove("ctrl-btn--active")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -843,13 +1015,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("name-input")?.addEventListener("keydown", e => e.key === "Enter" && enterRoom())
   document.getElementById("chat_message")?.addEventListener("keydown", e => e.key === "Enter" && sendMessage())
 
-  // Inject SVG icons into control buttons (replaces emoji spans)
+  // Inject SVG icons into control buttons
   const btnCfg = {
-    "btn-mute":   { svg: SVG.micOn,  label: "Mute",   active: true  },
-    "btn-camera": { svg: SVG.camOn,  label: "Camera", active: true  },
-    "btn-screen": { svg: SVG.share,  label: "Share",  active: false },
-    "btn-people": { svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`, label: null, active: false },
-    "btn-chat":   { svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`, label: null, active: false },
+    "btn-mute":   { svg: SVG.micOn,  active: true  },
+    "btn-camera": { svg: SVG.camOn,  active: true  },
+    "btn-screen": { svg: SVG.share,  active: false },
+    "btn-people": { svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`, active: false },
+    "btn-chat":   { svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`, active: false },
+    "btn-notes":  { svg: SVG.notes, active: false },
   }
   Object.entries(btnCfg).forEach(([id, cfg]) => {
     const btn = document.getElementById(id)
@@ -858,7 +1031,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if (ic) ic.innerHTML = cfg.svg
     if (cfg.active) btn.classList.add("ctrl-btn--active")
   })
-  // Leave button SVG
   const leaveBtn = document.querySelector(".leave-btn .ctrl-icon")
   if (leaveBtn) leaveBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>`
+
+  // Start camera/mic preview in the modal
+  initPreview()
+
+  // Notes textarea live-broadcast (debounced 800ms)
+  let notesBroadcastTimer = null
+  document.getElementById("notes-area")?.addEventListener("input", () => {
+    clearTimeout(notesBroadcastTimer)
+    notesBroadcastTimer = setTimeout(broadcastNotes, 800)
+  })
 })

@@ -166,6 +166,11 @@ io.on("connection", socket => {
     socket.to(roomId).emit("chat-message", message, username)
   })
 
+  // NOTES — broadcast to everyone else in the room
+  socket.on("notes-update", (roomId, content) => {
+    socket.to(roomId).emit("notes-update", content)
+  })
+
   // KICK
   socket.on("kick-user", targetId => {
     const { roomId, userId } = socket

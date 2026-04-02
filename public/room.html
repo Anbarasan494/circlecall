@@ -11,23 +11,39 @@
 </head>
 <body class="room">
 
-  <!-- ── Name modal ── -->
+  <!-- ── Name / pre-join modal ── -->
   <div id="name-modal" class="modal-overlay">
     <div class="mesh-bg modal-mesh">
       <div class="orb orb-1"></div>
       <div class="orb orb-2"></div>
     </div>
-    <div class="modal-box">
+    <div class="modal-box prejoin-box">
       <div class="modal-logo">
-        <div class="logo-icon sm">
-          <span class="logo-ring-outer"></span>
-          <span class="logo-ring-inner"></span>
-          <span class="logo-core"></span>
-        </div>
+        <div class="logo-icon sm"><span class="logo-ring-outer"></span><span class="logo-ring-inner"></span><span class="logo-core"></span></div>
         <span class="logo-wordmark sm">CircleCall</span>
       </div>
-      <h2 class="modal-title">Join Meeting</h2>
+      <h2 class="modal-title">Ready to join?</h2>
       <p id="room-code-display" class="modal-room-chip"></p>
+
+      <!-- Camera preview -->
+      <div class="preview-wrap">
+        <video id="preview-video" class="preview-video" autoplay playsinline muted></video>
+        <div id="preview-avatar" class="preview-avatar hidden">
+          <span id="preview-initial">?</span>
+        </div>
+        <!-- Preview mic/cam buttons -->
+        <div class="preview-controls">
+          <button id="preview-mic-btn" class="preview-btn">
+            <span class="preview-btn-icon"></span>
+            <span class="preview-btn-label">Muted</span>
+          </button>
+          <button id="preview-cam-btn" class="preview-btn">
+            <span class="preview-btn-icon"></span>
+            <span class="preview-btn-label">Cam On</span>
+          </button>
+        </div>
+      </div>
+
       <input id="name-input" class="modal-input" placeholder="Your display name" maxlength="30" autocomplete="off" />
       <button class="btn-modal-join" onclick="enterRoom()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
@@ -43,17 +59,12 @@
   <!-- ── Meeting UI ── -->
   <div class="meeting-container" id="meeting-ui" style="display:none">
 
-    <!-- Video area -->
     <div class="video-area">
 
       <!-- Top bar -->
       <div class="top-bar">
         <div class="tb-left">
-          <div class="logo-icon xs">
-            <span class="logo-ring-outer"></span>
-            <span class="logo-ring-inner"></span>
-            <span class="logo-core"></span>
-          </div>
+          <div class="logo-icon xs"><span class="logo-ring-outer"></span><span class="logo-ring-inner"></span><span class="logo-core"></span></div>
           <span class="logo-wordmark xs">CircleCall</span>
         </div>
         <div class="tb-center">
@@ -75,32 +86,30 @@
       <!-- Video grid -->
       <div id="video-grid"></div>
 
-      <!-- Controls — SVG icons injected by script.js on DOMContentLoaded -->
+      <!-- Controls — icon-only (no text labels except People count) -->
       <div class="controls">
-        <button id="btn-mute" class="ctrl-btn ctrl-btn--active" onclick="toggleMute()">
+        <button id="btn-mute" class="ctrl-btn ctrl-btn--active" onclick="toggleMute()" title="Mute / Unmute">
           <span class="ctrl-icon"></span>
-          <span class="ctrl-label">Mute</span>
         </button>
-        <button id="btn-camera" class="ctrl-btn ctrl-btn--active" onclick="toggleCamera()">
+        <button id="btn-camera" class="ctrl-btn ctrl-btn--active" onclick="toggleCamera()" title="Camera on / off">
           <span class="ctrl-icon"></span>
-          <span class="ctrl-label">Camera</span>
         </button>
-        <button id="btn-screen" class="ctrl-btn" onclick="toggleScreenShare()">
+        <button id="btn-screen" class="ctrl-btn" onclick="toggleScreenShare()" title="Share screen">
           <span class="ctrl-icon"></span>
-          <span class="ctrl-label">Share</span>
         </button>
-        <button id="btn-people" class="ctrl-btn" onclick="togglePanel('participants')">
+        <button id="btn-people" class="ctrl-btn" onclick="togglePanel('participants')" title="Participants">
           <span class="ctrl-icon"></span>
-          <span class="ctrl-label">People <span id="participant-count">1</span></span>
+          <span class="ctrl-badge" id="participant-count">1</span>
         </button>
-        <button id="btn-chat" class="ctrl-btn" onclick="togglePanel('chat')" style="position:relative">
+        <button id="btn-chat" class="ctrl-btn" onclick="togglePanel('chat')" title="Chat" style="position:relative">
           <span class="ctrl-icon"></span>
-          <span class="ctrl-label">Chat</span>
           <span id="chat-badge" class="chat-badge" style="display:none">0</span>
         </button>
-        <button class="ctrl-btn leave-btn" onclick="leave()">
+        <button id="btn-notes" class="ctrl-btn" onclick="togglePanel('notes')" title="Notes">
           <span class="ctrl-icon"></span>
-          <span class="ctrl-label">Leave</span>
+        </button>
+        <button class="ctrl-btn leave-btn" onclick="leave()" title="Leave meeting">
+          <span class="ctrl-icon"></span>
         </button>
       </div>
     </div>
@@ -136,11 +145,48 @@
         </div>
       </div>
 
+      <!-- Notes -->
+      <div id="panel-notes" class="panel-view notes-view" style="display:none">
+        <div class="panel-header">
+          <h3>Meeting Notes</h3>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="notes-dl-btn" onclick="downloadNotesPDF()" title="Download as PDF">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              PDF
+            </button>
+            <button class="panel-close" onclick="closePanel()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="notes-body">
+          <p class="notes-hint">Notes are visible to everyone in this meeting.</p>
+          <textarea id="notes-area" class="notes-area" placeholder="Type meeting notes here… Everyone can see and edit these."></textarea>
+        </div>
+      </div>
+
     </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
   <script src="/script.js"></script>
+
+  <script>
+    // Update preview avatar initial when name is typed
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("name-input")?.addEventListener("input", e => {
+        const initial = document.getElementById("preview-initial")
+        if (initial) initial.textContent = (e.target.value.trim()[0] || "?").toUpperCase()
+      })
+      // Init preview mic/cam button SVGs after SVG object is ready
+      setTimeout(() => {
+        const mb = document.getElementById("preview-mic-btn")
+        const cb = document.getElementById("preview-cam-btn")
+        if (mb) mb.querySelector(".preview-btn-icon").innerHTML = SVG?.micOn || "🎙️"
+        if (cb) cb.querySelector(".preview-btn-icon").innerHTML = SVG?.camOn || "📷"
+      }, 100)
+    })
+  </script>
 </body>
 </html>
