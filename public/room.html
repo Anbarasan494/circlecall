@@ -45,6 +45,9 @@
       </div>
 
       <input id="name-input" class="modal-input" placeholder="Your display name" maxlength="30" autocomplete="off" />
+      <div id="room-name-wrap" style="display:none">
+        <input id="room-name-input" class="modal-input" placeholder="Room name (optional)" maxlength="50" autocomplete="off" />
+      </div>
       <button class="btn-modal-join" onclick="enterRoom()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
         Join Now
@@ -76,6 +79,7 @@
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </div>
+          <span id="room-name-display" class="room-name-label" style="display:none"></span>
         </div>
         <div class="tb-right">
           <div id="call-timer" class="call-timer">00:00</div>
@@ -136,12 +140,33 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
+        <!-- Chat mode tabs -->
+        <div class="chat-tabs">
+          <button class="chat-tab active" id="tab-public" onclick="switchChatTab('public')">Everyone</button>
+          <button class="chat-tab" id="tab-private" onclick="switchChatTab('private')">Private</button>
+        </div>
+        <!-- Private chat: recipient selector -->
+        <div id="private-recipient-wrap" style="display:none" class="private-recipient-wrap">
+          <select id="private-recipient" class="private-select">
+            <option value="">— Select person —</option>
+          </select>
+        </div>
         <ul id="messages"></ul>
+        <ul id="private-messages" style="display:none"></ul>
         <div class="chat-input-row">
+          <button class="emoji-toggle-btn" id="emoji-toggle" onclick="toggleEmojiPicker()" title="Emoji">😊</button>
           <input id="chat_message" class="chat-input" placeholder="Message everyone…" maxlength="500" autocomplete="off" />
           <button class="btn-send" onclick="sendMessage()">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
+        </div>
+        <!-- Emoji picker -->
+        <div id="emoji-picker" class="emoji-picker" style="display:none">
+          <button class="emoji-btn" onclick="insertEmoji('👍')">👍</button>
+          <button class="emoji-btn" onclick="insertEmoji('👌')">👌</button>
+          <button class="emoji-btn" onclick="insertEmoji('😂')">😂</button>
+          <button class="emoji-btn" onclick="insertEmoji('👏')">👏</button>
+          <button class="emoji-btn" onclick="insertEmoji('❤️')">❤️</button>
         </div>
       </div>
 
@@ -160,8 +185,8 @@
           </div>
         </div>
         <div class="notes-body">
-          <p class="notes-hint">Notes are visible to everyone in this meeting.</p>
-          <textarea id="notes-area" class="notes-area" placeholder="Type meeting notes here… Everyone can see and edit these."></textarea>
+          <p class="notes-hint">Your personal notes — only visible to you.</p>
+          <textarea id="notes-area" class="notes-area" placeholder="Type your personal meeting notes here… Only you can see these."></textarea>
         </div>
       </div>
 
@@ -185,6 +210,9 @@
         const cb = document.getElementById("preview-cam-btn")
         if (mb) mb.querySelector(".preview-btn-icon").innerHTML = SVG?.micOn || "🎙️"
         if (cb) cb.querySelector(".preview-btn-icon").innerHTML = SVG?.camOn || "📷"
+        // Only show room name input for the meeting creator
+        const isCreator = new URLSearchParams(window.location.search).get("host") === "1"
+        if (isCreator) document.getElementById("room-name-wrap").style.display = "block"
       }, 100)
     })
   </script>

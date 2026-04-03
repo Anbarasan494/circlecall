@@ -99,14 +99,19 @@ function makeVideoEl(muted = false) {
   return v
 }
 function tryJoin() {
-  if (peerReady && streamReady) socket.emit("join-room", roomId, myPeerId, username)
+  if (peerReady && streamReady) {
+    const roomNameInput = document.getElementById("room-name-input")
+    const roomName = roomNameInput ? roomNameInput.value.trim() : ""
+    const isCreator = new URLSearchParams(window.location.search).get("host") === "1"
+    socket.emit("join-room", roomId, myPeerId, username, roomName, isCreator)
+  }
 }
 function safePlay(v) {
   v.play().catch(() => v.addEventListener("loadedmetadata", () => v.play(), { once: true }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Notes — shared per-session, downloadable as PDF on meeting end
+//  Notes — PERSONAL only, never shared. Downloadable as PDF.
 // ─────────────────────────────────────────────────────────────────────────────
 let notesContent = ""
 
@@ -137,17 +142,14 @@ function downloadNotesPDF() {
 }
 
 // Broadcast notes changes to all participants via chat channel
-socket.on("notes-update", (newContent) => {
-  notesContent = newContent
-  const area = document.getElementById("notes-area")
-  if (area && document.activeElement !== area) area.value = newContent
-})
+// Notes are now PERSONAL — no broadcast to others
+socket.on("notes-update", () => { /* no-op — notes are personal */ })
 
 function broadcastNotes() {
+  // Personal notes: just save locally, no socket emit
   const area = document.getElementById("notes-area")
   if (!area) return
   notesContent = area.value
-  socket.emit("notes-update", roomId, notesContent)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -342,8 +344,11 @@ function setTileStatus(id, micOn, camOn) {
     cam.style.display = "none" // never show cam icon — redundant with video/avatar
   }
 
-  // Speaking ring only visible when cam is off (on the avatar circle)
-  if (ring) ring.style.display = camOn ? "none" : ""
+  // Speaking ring — shown always (border when cam on, center ring when cam off)
+  if (ring) {
+    // Always keep it in DOM; CSS classes control appearance based on cam state
+    ring.dataset.camOn = camOn ? "1" : "0"
+  }
 
   // Update muted indicator on name tag
   const tag = w.querySelector(".name-tag")
@@ -470,7 +475,12 @@ function _attachAnalyser(id, stream) {
       an.getByteFrequencyData(data)
       const vol = data.reduce((a, b) => a + b, 0) / data.length
       const tile = tileStore.find(t => t.dataset.uid === id)
-      if (tile) tile.classList.toggle("speaking", vol > 12)
+      if (!tile) return
+      const isSpeaking = vol > 12
+      const camOn = tile.querySelector("video")?.style.display !== "none"
+      // Only show speaking indicator when camera is OFF (mic-only mode)
+      // When camera is on the video is already showing — no extra indicator needed
+      tile.classList.toggle("speaking", isSpeaking && !camOn)
     }, 100)
     _analyserNodes[id] = { iv }
   } catch(e) {}
@@ -503,9 +513,20 @@ function callPeer(id, name) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Socket events
 // ─────────────────────────────────────────────────────────────────────────────
-socket.on("existing-users", (users, isHost, hId) => {
+socket.on("existing-users", (users, isHost, hId, rName) => {
   amHost = isHost; hostId = hId
   if (isHost) document.getElementById("host-badge-label").style.display = "inline-flex"
+  // Display room name
+  if (rName) {
+    const lbl = document.getElementById("room-name-display")
+    if (lbl) { lbl.textContent = rName; lbl.style.display = "inline-flex" }
+    document.title = rName + " — CircleCall"
+  }
+  // Hide room name input once joined (non-host shouldn't set name)
+  if (!isHost) {
+    const rnw = document.getElementById("room-name-wrap")
+    if (rnw) rnw.style.display = "none"
+  }
   users.forEach(u => {
     const uid   = typeof u === "object" ? u.id       : u
     const uname = typeof u === "object" ? u.username : (usernames[uid] || uid)
@@ -514,13 +535,24 @@ socket.on("existing-users", (users, isHost, hId) => {
     callPeer(uid, uname)
   })
   rerenderParticipants()
+  updatePrivateRecipientList()
+})
+
+socket.on("room-ended", () => {
+  showToast("This meeting has ended — the host has left.", "error", 0)
+  setTimeout(() => window.location.href = "/", 3000)
 })
 
 socket.on("user-connected", (id, name) => {
   usernames[id] = name; mediaState[id] = { micOn: true, camOn: true }
   showToast(`${name} joined`, "success"); callPeer(id, name)
+  updatePrivateRecipientList()
 })
-socket.on("user-disconnected", id => { showToast(`${usernames[id] || "Someone"} left`); removeVideoTile(id) })
+socket.on("user-disconnected", id => {
+  showToast(`${usernames[id] || "Someone"} left`)
+  removeVideoTile(id)
+  updatePrivateRecipientList()
+})
 
 socket.on("waiting", () => showWaitingScreen())
 socket.on("user-waiting", (id, name) => {
@@ -791,6 +823,7 @@ function togglePanel(name) {
   if (activePanel === name) { closePanel(); return }
   activePanel = name
   document.getElementById("side-panel").classList.add("open")
+  document.querySelector(".meeting-container")?.classList.add("panel-open")
   document.getElementById("panel-participants").style.display = name === "participants" ? "flex" : "none"
   document.getElementById("panel-chat").style.display         = name === "chat"         ? "flex" : "none"
   document.getElementById("panel-notes").style.display        = name === "notes"        ? "flex" : "none"
@@ -803,7 +836,6 @@ function togglePanel(name) {
     if (badge) badge.style.display = "none"
   }
   if (name === "notes") {
-    // Sync latest notes into textarea
     const area = document.getElementById("notes-area")
     if (area && notesContent) area.value = notesContent
   }
@@ -811,6 +843,7 @@ function togglePanel(name) {
 
 function closePanel() {
   document.getElementById("side-panel").classList.remove("open")
+  document.querySelector(".meeting-container")?.classList.remove("panel-open")
   activePanel = null
   document.getElementById("btn-people").classList.remove("ctrl-btn--active")
   document.getElementById("btn-chat").classList.remove("ctrl-btn--active")
@@ -955,15 +988,48 @@ function showActionPrompt(message, btnLabel, action) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Chat
+//  Chat — public + private
 // ─────────────────────────────────────────────────────────────────────────────
+let chatMode = "public"  // "public" | "private"
+let privateUnread = {}   // peerId -> count
+
+function switchChatTab(mode) {
+  chatMode = mode
+  document.getElementById("tab-public").classList.toggle("active", mode === "public")
+  document.getElementById("tab-private").classList.toggle("active", mode === "private")
+  document.getElementById("messages").style.display         = mode === "public"  ? "flex" : "none"
+  document.getElementById("private-messages").style.display = mode === "private" ? "flex" : "none"
+  document.getElementById("private-recipient-wrap").style.display = mode === "private" ? "flex" : "none"
+  const inp = document.getElementById("chat_message")
+  if (inp) inp.placeholder = mode === "public" ? "Message everyone…" : "Private message…"
+  if (mode === "private") {
+    const sel = document.getElementById("private-recipient")
+    const pid = sel?.value
+    if (pid && privateUnread[pid]) {
+      privateUnread[pid] = 0
+      _refreshPrivateBadge()
+    }
+  }
+  closeEmojiPicker()
+}
+
 function sendMessage() {
   const inp = document.getElementById("chat_message")
   const msg = inp.value.trim()
   if (!msg) return
-  socket.emit("chat-message", roomId, msg, username)
-  appendMessage(username, msg, true)
+
+  if (chatMode === "private") {
+    const sel = document.getElementById("private-recipient")
+    const targetId = sel?.value
+    if (!targetId) { showToast("Select a person to message privately", "info"); return }
+    socket.emit("private-message", targetId, msg)
+    appendPrivateMessage(username, msg, true, targetId)
+  } else {
+    socket.emit("chat-message", roomId, msg, username)
+    appendMessage(username, msg, true)
+  }
   inp.value = ""
+  closeEmojiPicker()
 }
 
 function appendMessage(sender, text, isSelf) {
@@ -975,6 +1041,95 @@ function appendMessage(sender, text, isSelf) {
   li.innerHTML = `<span class="msg-sender">${isSelf?"You":escapeHtml(sender)}</span><span class="msg-text">${escapeHtml(text)}</span><span class="msg-time">${time}</span>`
   ul.appendChild(li)
   ul.scrollTop = ul.scrollHeight
+}
+
+function appendPrivateMessage(sender, text, isSelf, peerId) {
+  const ul = document.getElementById("private-messages")
+  if (!ul) return
+  const li = document.createElement("li")
+  li.classList.add("msg-item", isSelf ? "msg-self" : "msg-other", "msg-private")
+  li.dataset.peer = peerId
+  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  const peerLabel = isSelf
+    ? ("→ " + escapeHtml(usernames[peerId] || "?"))
+    : ("🔒 " + escapeHtml(sender))
+  li.innerHTML = `<span class="msg-sender">${peerLabel}</span><span class="msg-text">${escapeHtml(text)}</span><span class="msg-time">${time}</span>`
+  ul.appendChild(li)
+  // Show all if no filter, or if matches selected peer
+  const sel = document.getElementById("private-recipient")
+  const filterId = sel?.value
+  li.style.display = (!filterId || filterId === peerId) ? "" : "none"
+  ul.scrollTop = ul.scrollHeight
+}
+
+// Filter private messages when recipient changes
+document.addEventListener("change", e => {
+  if (e.target.id !== "private-recipient") return
+  const pid = e.target.value
+  document.querySelectorAll("#private-messages .msg-private").forEach(li => {
+    li.style.display = (!pid || li.dataset.peer === pid) ? "" : "none"
+  })
+  if (pid && privateUnread[pid]) {
+    privateUnread[pid] = 0
+    _refreshPrivateBadge()
+  }
+})
+
+socket.on("private-message", (message, senderId, senderName) => {
+  usernames[senderId] = senderName
+  appendPrivateMessage(senderName, message, false, senderId)
+  if (activePanel !== "chat" || chatMode !== "private") {
+    privateUnread[senderId] = (privateUnread[senderId] || 0) + 1
+    _refreshPrivateBadge()
+    if (activePanel !== "chat") {
+      chatUnread++
+      const badge = document.getElementById("chat-badge")
+      if (badge) { badge.textContent = chatUnread; badge.style.display = "flex" }
+    }
+    showToast(`🔒 Private: ${senderName}`, "info", 2500)
+  }
+})
+
+function _refreshPrivateBadge() {
+  const total = Object.values(privateUnread).reduce((a,b)=>a+b,0)
+  const btn = document.getElementById("tab-private")
+  if (btn) btn.dataset.badge = total > 0 ? total : ""
+  btn?.classList.toggle("has-badge", total > 0)
+}
+
+function updatePrivateRecipientList() {
+  const sel = document.getElementById("private-recipient")
+  if (!sel) return
+  const prev = sel.value
+  sel.innerHTML = '<option value="">— Select person —</option>'
+  Object.entries(usernames).forEach(([id, name]) => {
+    if (id === myPeerId || id === "local") return
+    const opt = document.createElement("option")
+    opt.value = id; opt.textContent = name
+    sel.appendChild(opt)
+  })
+  if (prev) sel.value = prev
+}
+
+// Emoji picker
+function toggleEmojiPicker() {
+  const p = document.getElementById("emoji-picker")
+  if (!p) return
+  const open = p.style.display !== "none"
+  p.style.display = open ? "none" : "flex"
+}
+function closeEmojiPicker() {
+  const p = document.getElementById("emoji-picker")
+  if (p) p.style.display = "none"
+}
+function insertEmoji(emoji) {
+  const inp = document.getElementById("chat_message")
+  if (!inp) return
+  const pos = inp.selectionStart ?? inp.value.length
+  inp.value = inp.value.slice(0, pos) + emoji + inp.value.slice(pos)
+  inp.focus()
+  inp.selectionStart = inp.selectionEnd = pos + emoji.length
+  closeEmojiPicker()
 }
 
 function escapeHtml(s) {
@@ -1037,10 +1192,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Start camera/mic preview in the modal
   initPreview()
 
-  // Notes textarea live-broadcast (debounced 800ms)
-  let notesBroadcastTimer = null
+  // Notes textarea — save locally, no broadcast
   document.getElementById("notes-area")?.addEventListener("input", () => {
-    clearTimeout(notesBroadcastTimer)
-    notesBroadcastTimer = setTimeout(broadcastNotes, 800)
+    notesContent = document.getElementById("notes-area").value
   })
 })

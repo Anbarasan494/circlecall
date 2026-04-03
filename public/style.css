@@ -572,13 +572,13 @@ body.room {
 }
 
 .meeting-container {
-  display: flex; height: 100vh;
+  display: flex; height: 100vh; width: 100vw; overflow: hidden;
 }
 
 /* ── Video area ─────────────────────────────────────────────────────────────── */
 .video-area {
-  flex: 1; display: flex; flex-direction: column; min-width: 0;
-  background: var(--black);
+  flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  background: var(--black); overflow: hidden;
 }
 
 /* Top bar */
@@ -657,7 +657,7 @@ body.room .logo-wordmark {
 
 /* ── Video grid ─────────────────────────────────────────────────────────────── */
 #video-grid {
-  flex: 1; min-height: 0;
+  flex: 1; min-height: 0; min-width: 0;
   display: grid;
   gap: 6px; padding: 8px;
   background: #0a0b0e;
@@ -715,7 +715,7 @@ body.room .logo-wordmark {
 }
 .tile-status span svg { width: 13px; height: 13px; }
 
-/* Speaking ring — centred circle, NOT border glow */
+/* Speaking ring — centred circle, NOT border glow. Amber = complementary to sky blue */
 .speaking-ring {
   position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
@@ -725,13 +725,13 @@ body.room .logo-wordmark {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .video-wrapper.speaking .speaking-ring {
-  border-color: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34,197,94,0.25), 0 0 18px rgba(34,197,94,0.5);
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245,158,11,0.25), 0 0 18px rgba(245,158,11,0.5);
   animation: speakRing 0.7s ease-in-out infinite alternate;
 }
 @keyframes speakRing {
-  from { box-shadow: 0 0 0 3px rgba(34,197,94,0.2),  0 0 10px rgba(34,197,94,0.4); }
-  to   { box-shadow: 0 0 0 6px rgba(34,197,94,0.35), 0 0 22px rgba(34,197,94,0.6); }
+  from { box-shadow: 0 0 0 3px rgba(245,158,11,0.2),  0 0 10px rgba(245,158,11,0.4); }
+  to   { box-shadow: 0 0 0 6px rgba(245,158,11,0.35), 0 0 22px rgba(245,158,11,0.6); }
 }
 
 /* Pin overlay — appears on hover */
@@ -766,6 +766,10 @@ body.room .logo-wordmark {
   flex-wrap: nowrap; overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  /* Ensure controls are always visible and centered */
+  min-height: 60px;
+  width: 100%;
+  position: relative; z-index: 20;
 }
 .controls::-webkit-scrollbar { display: none; }
 
@@ -835,6 +839,7 @@ body.room .logo-wordmark {
   background: #f0f9ff;
   border-left: 2px solid rgba(14,165,233,0.25);
   display: none; flex-direction: column;
+  overflow: hidden; min-height: 0;
   animation: slidePanel 0.2s ease;
 }
 @keyframes slidePanel { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
@@ -1098,6 +1103,9 @@ body.room .logo-wordmark {
 @media (max-width: 700px) {
   .meeting-container { flex-direction: column; }
 
+  /* Video area takes remaining space above the side panel */
+  .video-area { flex: 1; min-height: 0; }
+
   /* Side panel slides up from bottom */
   .side-panel {
     position: fixed; bottom: 0; left: 0; right: 0; width: 100%;
@@ -1107,9 +1115,13 @@ body.room .logo-wordmark {
     box-shadow: 0 -8px 40px rgba(0,0,0,0.5);
   }
 
-  /* Controls scroll horizontally */
-  .controls { gap: 5px; padding: 8px 10px; justify-content: flex-start; }
-  .ctrl-btn { min-width: 50px; padding: 8px 9px; }
+  /* Controls: always centered, scroll horizontally if needed */
+  .controls {
+    gap: 5px; padding: 8px 6px;
+    justify-content: center;
+    /* Add bottom padding when panel is open so controls aren't hidden */
+  }
+  .ctrl-btn { min-width: 44px; padding: 8px 9px; }
 
   #video-grid { padding: 4px; gap: 4px; }
 
@@ -1132,6 +1144,11 @@ body.room .logo-wordmark {
   /* Admit cards above controls */
   #admit-container { top: auto; bottom: 90px; right: 8px; left: 8px; }
   .admit-card { width: 100%; }
+
+  /* When panel is open, push controls up */
+  .meeting-container.panel-open .video-area {
+    padding-bottom: 55vh;
+  }
 }
 
 /* ── ≤480px: phone ── */
@@ -1141,19 +1158,20 @@ body.room .logo-wordmark {
   .logo-wordmark.xs { display: none; }
   .host-badge { font-size: 10px; padding: 2px 7px; }
 
-  .ctrl-btn { min-width: 44px; padding: 7px 8px; }
+  .ctrl-btn { min-width: 40px; padding: 7px 7px; }
   .ctrl-icon { width: 18px; height: 18px; }
   .ctrl-icon svg { width: 16px; height: 16px; }
-  .ctrl-label { font-size: 9px; }
 
   #video-grid { padding: 3px; gap: 3px; }
 
-  .side-panel { max-height: 62vh; }
+  .side-panel { max-height: 60vh; }
   .home-card { width: 96vw; padding: 22px 16px; }
   .modal-box { width: 96vw; padding: 26px 16px; }
 
   #ss-thumbs { height: 88px; }
   .ss-thumb { width: 74px !important; height: 74px !important; }
+
+  .chat-tab { font-size: 11px; padding: 8px 8px; }
 }
 
 /* Scrollbar global */
@@ -1161,3 +1179,86 @@ body.room .logo-wordmark {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(56,189,248,0.2); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(56,189,248,0.4); }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ROOM NAME LABEL (top bar)
+══════════════════════════════════════════════════════════════════════════════ */
+.room-name-label {
+  font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.5);
+  letter-spacing: 0.04em; max-width: 160px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+@media (max-width: 600px) { .room-name-label { display: none !important; } }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CHAT TABS
+══════════════════════════════════════════════════════════════════════════════ */
+.chat-tabs {
+  display: flex; flex-shrink: 0;
+  border-bottom: 1.5px solid rgba(14,165,233,0.15);
+  background: #fff;
+}
+.chat-tab {
+  flex: 1; padding: 9px 12px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  font-family: var(--font-ui); font-size: 12px; font-weight: 600;
+  color: var(--text-3); cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  position: relative;
+}
+.chat-tab.active { color: var(--sky-600); border-bottom-color: var(--sky-500); }
+.chat-tab:hover:not(.active) { color: var(--sky-500); }
+/* Unread badge on Private tab */
+.chat-tab.has-badge::after {
+  content: attr(data-badge);
+  position: absolute; top: 6px; right: 10px;
+  background: var(--red); color: #fff; font-size: 9px; font-weight: 700;
+  border-radius: 99px; min-width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center; padding: 0 3px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PRIVATE CHAT
+══════════════════════════════════════════════════════════════════════════════ */
+.private-recipient-wrap {
+  padding: 7px 12px; background: #fff; flex-shrink: 0;
+  border-bottom: 1px solid rgba(14,165,233,0.12);
+}
+.private-select {
+  width: 100%; background: var(--sky-50);
+  border: 1.5px solid rgba(14,165,233,0.25); border-radius: var(--r-md);
+  color: var(--ink-900); padding: 7px 10px;
+  font-family: var(--font-ui); font-size: 12px; outline: none;
+  transition: border-color 0.2s;
+}
+.private-select:focus { border-color: var(--sky-500); }
+.msg-private .msg-text { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); }
+.msg-private .msg-sender { color: #b45309; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   EMOJI PICKER
+══════════════════════════════════════════════════════════════════════════════ */
+.emoji-picker {
+  display: flex; gap: 4px; padding: 8px 12px;
+  background: #fff; border-top: 1px solid rgba(14,165,233,0.12);
+  flex-shrink: 0;
+}
+.emoji-btn {
+  font-size: 22px; background: none; border: none; cursor: pointer;
+  border-radius: var(--r-sm); padding: 4px 6px;
+  transition: transform 0.12s, background 0.15s;
+  line-height: 1;
+}
+.emoji-btn:hover { transform: scale(1.3); background: rgba(14,165,233,0.08); }
+.emoji-toggle-btn {
+  flex-shrink: 0; width: 36px; height: 36px;
+  background: var(--sky-50); border: 1.5px solid rgba(14,165,233,0.2);
+  border-radius: var(--r-md); font-size: 17px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+  align-self: center;
+}
+.emoji-toggle-btn:hover { background: var(--sky-100); border-color: var(--sky-400); transform: scale(1.08); }
+
+/* chat-input-row flex alignment with emoji button */
+.chat-input-row { align-items: center; }

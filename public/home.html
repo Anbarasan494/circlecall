@@ -73,7 +73,7 @@
   <script>
     function createMeeting() {
       const id = Math.random().toString(36).substring(2, 8)
-      window.location.href = "/room/" + id
+      window.location.href = "/room/" + id + "?host=1"
     }
     function joinMeeting() {
       const id = document.getElementById("meetingId").value.trim()

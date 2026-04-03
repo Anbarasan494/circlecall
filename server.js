@@ -55,22 +55,41 @@ io.on("connection", socket => {
   })
 
   // JOIN
-  socket.on("join-room", (roomId, userId, username) => {
-    if (!rooms[roomId])
-      rooms[roomId] = { host: userId, members: {}, waiting: {} }
-
+  socket.on("join-room", (roomId, userId, username, roomName, isCreator) => {
     socket.userId = userId
     socket.roomId = roomId
 
-    if (rooms[roomId].host === userId) {
-      rooms[roomId].members[userId] = { socketId: socket.id, username, micOn: true, camOn: true }
+    // Room doesn't exist yet
+    if (!rooms[roomId]) {
+      if (!isCreator) {
+        // Guest arrived before host — room doesn't exist, tell them it ended
+        socket.emit("room-ended")
+        return
+      }
+      // Creator makes the room
+      rooms[roomId] = { host: userId, members: {}, waiting: {}, name: roomName || (username + "'s room") }
+    }
+
+    const room = rooms[roomId]
+
+    if (isCreator && room.host === userId) {
+      // Host (re)joining their own room
+      if (roomName) room.name = roomName
+      room.members[userId] = { socketId: socket.id, username, micOn: true, camOn: true }
       socket.join(roomId)
-      socket.emit("existing-users", [], true, userId)
+      socket.emit("existing-users", [], true, userId, room.name)
       broadcastParticipants(roomId)
-    } else {
-      rooms[roomId].waiting[userId] = { socketId: socket.id, username }
+    } else if (isCreator && room.host !== userId) {
+      // Someone else created a room with the same id already — treat as guest
+      room.waiting[userId] = { socketId: socket.id, username }
       socket.emit("waiting")
-      const host = rooms[roomId].members[rooms[roomId].host]
+      const host = room.members[room.host]
+      if (host) io.to(host.socketId).emit("user-waiting", userId, username)
+    } else {
+      // Normal guest joining
+      room.waiting[userId] = { socketId: socket.id, username }
+      socket.emit("waiting")
+      const host = room.members[room.host]
       if (host) io.to(host.socketId).emit("user-waiting", userId, username)
     }
   })
@@ -103,7 +122,7 @@ io.on("connection", socket => {
     const existing = Object.entries(rooms[roomId].members)
       .filter(([id]) => id !== userId)
       .map(([id, m]) => ({ id, username: m.username, micOn: m.micOn, camOn: m.camOn }))
-    socket.emit("existing-users", existing, false, rooms[roomId].host)
+    socket.emit("existing-users", existing, false, rooms[roomId].host, rooms[roomId].name || "")
     socket.to(roomId).emit("user-connected", userId, user.username)
     broadcastParticipants(roomId)
   })
@@ -161,15 +180,24 @@ io.on("connection", socket => {
     if (rooms[roomId]) socket.to(roomId).emit("screen-share-stopped", userId)
   })
 
-  // CHAT
+  // CHAT (public)
   socket.on("chat-message", (roomId, message, username) => {
     socket.to(roomId).emit("chat-message", message, username)
   })
 
-  // NOTES — broadcast to everyone else in the room
-  socket.on("notes-update", (roomId, content) => {
-    socket.to(roomId).emit("notes-update", content)
+  // PRIVATE CHAT — only delivered to target socket; host excluded
+  socket.on("private-message", (targetId, message) => {
+    const { roomId, userId } = socket
+    if (!rooms[roomId]) return
+    const target = rooms[roomId].members[targetId]
+    if (!target) return
+    // Deliver only to sender + receiver — nobody else (including host) gets it
+    io.to(target.socketId).emit("private-message", message, userId,
+      rooms[roomId].members[userId]?.username || "?")
   })
+
+  // NOTES — personal only, NOT broadcast anymore (handled client-side)
+  socket.on("notes-update", (_roomId, _content) => { /* intentionally no-op */ })
 
   // KICK
   socket.on("kick-user", targetId => {
