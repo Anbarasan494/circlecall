@@ -165,6 +165,12 @@ async function initPreview() {
   const camBtn  = document.getElementById("preview-cam-btn")
   if (!preview) return
 
+  // Inject SVG icons into preview buttons (SVG object is defined by now)
+  const micIcon = document.querySelector("#preview-mic-btn .preview-btn-icon")
+  const camIcon = document.querySelector("#preview-cam-btn .preview-btn-icon")
+  if (micIcon) micIcon.innerHTML = SVG.micOn
+  if (camIcon) camIcon.innerHTML = SVG.camOn
+
   try {
     previewStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
     preview.srcObject = previewStream
@@ -182,7 +188,7 @@ async function initPreview() {
     if (track) track.enabled = !previewMuted
     micBtn.classList.toggle("preview-btn--off", previewMuted)
     micBtn.querySelector(".preview-btn-icon").innerHTML = previewMuted ? SVG.micOff : SVG.micOn
-    micBtn.querySelector(".preview-btn-label").textContent = previewMuted ? "Unmuted" : "Muted"
+    micBtn.querySelector(".preview-btn-label").textContent = previewMuted ? "Muted" : "Unmuted"
   })
 
   camBtn?.addEventListener("click", () => {
@@ -239,8 +245,19 @@ function enterRoom() {
       previewStream = null
     })
     .catch(err => {
-      console.error("getUserMedia:", err)
-      showToast("Camera/mic denied — check browser permissions", "error")
+      console.warn("getUserMedia:", err)
+      // Allow joining without camera/mic
+      myStream = new MediaStream()
+      myVideo = makeVideoEl(true)
+      addVideoTile("local", myVideo, myStream, username)
+      isMuted = true; isCameraOff = true
+      _syncControlButtons()
+      streamReady = true
+      drainPendingCalls()
+      startTimer()
+      tryJoin()
+      previewStream = null
+      showToast("No camera/mic — joined audio-free", "info")
     })
 }
 
@@ -419,8 +436,8 @@ function updateGridLayout() {
       ? "display:flex;flex-direction:row;gap:5px;overflow-x:auto;padding:4px 5px;height:120px;flex-shrink:0;background:#0a0b0e"
       : "display:flex;flex-direction:column;gap:5px;overflow-y:auto;padding:5px 4px;width:180px;flex-shrink:0;background:#0a0b0e"
     others.forEach(t => {
-      t.style.flex = ""; t.style.width = isMobile ? "100px" : "100%"
-      t.style.height = isMobile ? "100px" : "auto"; t.style.aspectRatio = "1/1"; t.style.flexShrink = "0"
+      t.style.flex = ""; t.style.width = isMobile ? "160px" : "100%"
+      t.style.height = isMobile ? "90px" : "auto"; t.style.aspectRatio = "16/9"; t.style.flexShrink = "0"
       strip.appendChild(t)
     })
     videoGrid.appendChild(strip)
@@ -442,13 +459,13 @@ function updateGridLayout() {
   videoGrid.style.display = "grid"
   videoGrid.style.flexDirection = ""
   videoGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
-  videoGrid.style.gridAutoRows = "1fr"
+  videoGrid.style.gridAutoRows = "minmax(0, 1fr)"
   videoGrid.style.gridTemplateRows = ""
   videoGrid.innerHTML = ""
 
   tileStore.forEach(t => {
     t.style.flex = ""; t.style.width = "100%"; t.style.height = "100%"
-    t.style.aspectRatio = "1/1"; t.style.flexShrink = ""
+    t.style.aspectRatio = "16/9"; t.style.flexShrink = ""
     videoGrid.appendChild(t)
   })
 }
@@ -661,8 +678,7 @@ function applyMute(mute) {
   if (!btn) return
   btn.classList.toggle("ctrl-btn--active", !mute)
   btn.classList.toggle("ctrl-btn--muted",   mute)
-  btn.querySelector(".ctrl-icon").innerHTML    = mute ? SVG.micOff : SVG.micOn
-  btn.querySelector(".ctrl-label").textContent = mute ? "Unmute" : "Mute"
+  btn.querySelector(".ctrl-icon").innerHTML = mute ? SVG.micOff : SVG.micOn
   socket.emit("media-state", !isMuted, !isCameraOff)
   setTileStatus("local", !isMuted, !isCameraOff)
 }
@@ -675,8 +691,7 @@ function applyCamOff(off) {
   if (!btn) return
   btn.classList.toggle("ctrl-btn--active", !off)
   btn.classList.toggle("ctrl-btn--muted",   off)
-  btn.querySelector(".ctrl-icon").innerHTML    = off ? SVG.camOff : SVG.camOn
-  btn.querySelector(".ctrl-label").textContent = off ? "Start Cam" : "Camera"
+  btn.querySelector(".ctrl-icon").innerHTML = off ? SVG.camOff : SVG.camOn
   socket.emit("media-state", !isMuted, !isCameraOff)
   setTileStatus("local", !isMuted, !isCameraOff)
 }
@@ -726,7 +741,7 @@ async function toggleScreenShare() {
     screenTrack.onended = stopScreenShare
 
     const btn = document.getElementById("btn-screen")
-    if (btn) { btn.classList.add("ctrl-btn--active"); btn.querySelector(".ctrl-label").textContent = "Stop" }
+    if (btn) { btn.classList.add("ctrl-btn--active") }
   } catch {
     showToast("Screen share cancelled or unavailable", "info")
   }
@@ -751,7 +766,7 @@ function stopScreenShare() {
   exitPresentationMode()
 
   const btn = document.getElementById("btn-screen")
-  if (btn) { btn.classList.remove("ctrl-btn--active"); btn.querySelector(".ctrl-label").textContent = "Share" }
+  if (btn) { btn.classList.remove("ctrl-btn--active") }
 }
 
 function enterPresentationMode(screenSrc, sharerId, sharerName) {
@@ -939,9 +954,6 @@ function avatarColor(name = "") {
   let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % colors.length
   return colors[h]
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Waiting / admit UI
 // ─────────────────────────────────────────────────────────────────────────────
 function showWaitingScreen() {
   document.getElementById("name-modal").style.display = "none"
@@ -1135,9 +1147,6 @@ function insertEmoji(emoji) {
 function escapeHtml(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 function showToast(message, type = "info", duration = 3000) {
   const t = document.getElementById("toast")

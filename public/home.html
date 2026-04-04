@@ -76,7 +76,7 @@
       window.location.href = "/room/" + id + "?host=1"
     }
     function joinMeeting() {
-      const id = document.getElementById("meetingId").value.trim()
+      const id = document.getElementById("meetingId").value.trim().toLowerCase()
       if (!id) {
         const h = document.getElementById("hint")
         h.textContent = "Please enter a meeting code."

@@ -578,7 +578,7 @@ body.room {
 /* ── Video area ─────────────────────────────────────────────────────────────── */
 .video-area {
   flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0;
-  background: var(--black); overflow: hidden;
+  background: var(--black); overflow: clip;
 }
 
 /* Top bar */
@@ -661,11 +661,12 @@ body.room .logo-wordmark {
   display: grid;
   gap: 6px; padding: 8px;
   background: #0a0b0e;
-  overflow: hidden;
+  overflow-y: auto;
   align-content: center;
+  align-items: stretch;
   justify-content: center;
   grid-template-columns: 1fr;
-  grid-auto-rows: 1fr;
+  grid-auto-rows: minmax(0, 1fr);
 }
 .grid-row { display: contents; }
 
@@ -674,7 +675,7 @@ body.room .logo-wordmark {
   background: var(--ink-900);
   border-radius: var(--r-md);
   overflow: hidden;
-  width: 100%; aspect-ratio: 1/1;
+  width: 100%; aspect-ratio: 16/9;
   border: 1px solid rgba(14,165,233,0.1);
   transition: border-color 0.3s, box-shadow 0.3s;
   cursor: pointer;
@@ -915,6 +916,10 @@ body.room .logo-wordmark {
 #messages {
   flex: 1; padding: 12px; overflow-y: auto; list-style: none;
   display: flex; flex-direction: column; gap: 10px; min-height: 0; background: #f0f9ff;
+}
+#private-messages {
+  flex: 1; padding: 12px; overflow-y: auto; list-style: none;
+  display: none; flex-direction: column; gap: 10px; min-height: 0; background: #f0f9ff;
 }
 .msg-item { display: flex; flex-direction: column; gap: 2px; max-width: 84%; }
 .msg-self  { align-self: flex-end;  align-items: flex-end; }
