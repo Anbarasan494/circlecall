@@ -188,7 +188,7 @@ async function initPreview() {
     if (track) track.enabled = !previewMuted
     micBtn.classList.toggle("preview-btn--off", previewMuted)
     micBtn.querySelector(".preview-btn-icon").innerHTML = previewMuted ? SVG.micOff : SVG.micOn
-    micBtn.querySelector(".preview-btn-label").textContent = previewMuted ? "Muted" : "Unmuted"
+    micBtn.querySelector(".preview-btn-label").textContent = ""
   })
 
   camBtn?.addEventListener("click", () => {
@@ -199,7 +199,7 @@ async function initPreview() {
     document.getElementById("preview-avatar")?.classList.toggle("hidden", !previewCamOff)
     camBtn.classList.toggle("preview-btn--off", previewCamOff)
     camBtn.querySelector(".preview-btn-icon").innerHTML = previewCamOff ? SVG.camOff : SVG.camOn
-    camBtn.querySelector(".preview-btn-label").textContent = previewCamOff ? "Cam Off" : "Cam On"
+    camBtn.querySelector(".preview-btn-label").textContent = ""
   })
 }
 
@@ -463,9 +463,12 @@ function updateGridLayout() {
   videoGrid.style.gridTemplateRows = ""
   videoGrid.innerHTML = ""
 
+  // Use square aspect ratio on mobile for better visibility
+  const tileAspect = isMobile ? "1/1" : "16/9"
+
   tileStore.forEach(t => {
     t.style.flex = ""; t.style.width = "100%"; t.style.height = "100%"
-    t.style.aspectRatio = "16/9"; t.style.flexShrink = ""
+    t.style.aspectRatio = tileAspect; t.style.flexShrink = ""
     videoGrid.appendChild(t)
   })
 }
@@ -1157,7 +1160,8 @@ function showToast(message, type = "info", duration = 3000) {
 }
 
 function copyRoomCode() {
-  navigator.clipboard.writeText(roomId).then(() => showToast("Room code copied!", "success"))
+  const fullLink = `${location.origin}/room/${roomId}`
+  navigator.clipboard.writeText(fullLink).then(() => showToast("Meeting link copied! Share it to invite others.", "success"))
 }
 
 function startTimer() {

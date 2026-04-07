@@ -405,13 +405,13 @@ body.home {
   display: flex; gap: 8px;
 }
 .preview-btn {
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  display: flex; align-items: center; justify-content: center;
   background: rgba(17,19,24,0.85); backdrop-filter: blur(8px);
   border: 1px solid rgba(255,255,255,0.12); border-radius: var(--r-md);
-  color: rgba(255,255,255,0.8); padding: 8px 14px; cursor: pointer;
+  color: rgba(255,255,255,0.8); padding: 10px; cursor: pointer;
   font-family: var(--font-ui); font-size: 10px; font-weight: 500;
   transition: background 0.15s, border-color 0.15s;
-  min-width: 64px;
+  width: 44px; height: 44px;
 }
 .preview-btn:hover { background: rgba(56,189,248,0.15); border-color: var(--sky-400); color: #fff; }
 .preview-btn--off { background: rgba(244,63,94,0.15); border-color: rgba(244,63,94,0.4); color: #f87171; }
@@ -1123,12 +1123,18 @@ body.room .logo-wordmark {
   /* Controls: always centered, scroll horizontally if needed */
   .controls {
     gap: 5px; padding: 8px 6px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
     justify-content: center;
-    /* Add bottom padding when panel is open so controls aren't hidden */
   }
   .ctrl-btn { min-width: 44px; padding: 8px 9px; }
 
-  #video-grid { padding: 4px; gap: 4px; }
+  /* Video grid: square tiles on mobile for better visibility */
+  #video-grid {
+    padding: 4px; gap: 4px;
+    align-content: start;
+    grid-auto-rows: auto;
+  }
+  /* Video wrappers default to 16/9; script.js overrides to 1/1 on mobile */
 
   .home-card { width: 92vw; padding: 28px 20px; }
   .modal-box { width: 92vw; padding: 30px 20px; }
