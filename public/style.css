@@ -1722,7 +1722,8 @@ body.room .logo-wordmark {
   transition: border-color 0.2s;
 }
 .private-select:focus { border-color: var(--sky-500); }
-.msg-private .msg-text { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); }
+.msg-private .msg-text {   background: linear-gradient(135deg, #7c3aed, #4c1d95); /* purple */
+  color: #fff; }
 .msg-private .msg-sender { color: #b45309; }
 
 /* ══════════════════════════════════════════════════════════════════════════════
