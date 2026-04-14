@@ -936,7 +936,7 @@ body.room .logo-wordmark {
 .msg-sender { font-size: 10px; font-weight: 700; color: var(--sky-600); }
 .msg-text { padding: 8px 12px; border-radius: 14px; font-size: 13px; line-height: 1.5; word-break: break-word; }
 .msg-other .msg-text { background: #fff; border: 1.5px solid rgba(14,165,233,0.2); color: var(--ink-900); }
-.msg-self  .msg-text { background: var(--grad-btn); border: none; color: #fff; }
+.msg-self  .msg-text { background: linear-gradient(135deg, #0369a1, #0c4a6e); color: #fff; }
 .msg-time { font-size: 9px; color: var(--text-3); padding: 0 2px; }
 
 .chat-input-row {
