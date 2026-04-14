@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#08090a">
   <title>CircleCall Meeting</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -206,6 +210,44 @@
       const isCreator = new URLSearchParams(window.location.search).get("host") === "1"
       if (isCreator) document.getElementById("room-name-wrap").style.display = "block"
       // Preview SVG icons are injected by initPreview() inside script.js
+
+      // ── Mobile: tap backdrop (side-panel::before) to close panel ──
+      const sidePanel = document.getElementById("side-panel")
+      if (sidePanel) {
+        sidePanel.addEventListener("click", e => {
+          // If user tapped outside the visible panel content (on the dimmed backdrop)
+          if (e.target === sidePanel) {
+            if (typeof closePanel === "function") closePanel()
+          }
+        })
+      }
+
+      // ── Mobile: push content up when keyboard opens (iOS Safari fix) ──
+      // Uses visualViewport API where available
+      if (window.visualViewport) {
+        const vv = window.visualViewport
+        let keyboardOpen = false
+        vv.addEventListener("resize", () => {
+          const panel = document.getElementById("side-panel")
+          if (!panel || !panel.classList.contains("open")) return
+          // When keyboard opens, viewport height shrinks
+          const heightDiff = window.innerHeight - vv.height
+          if (heightDiff > 100) {
+            // Keyboard is open — shift panel up by the keyboard height
+            panel.style.transform = `translateY(-${Math.max(0, heightDiff - vv.offsetTop)}px)`
+            keyboardOpen = true
+          } else {
+            panel.style.transform = ""
+            keyboardOpen = false
+          }
+        })
+      }
+
+      // ── Mobile: prevent double-tap zoom on control buttons ──
+      document.querySelectorAll(".ctrl-btn, .btn-new-meeting, .btn-modal-join, .btn-join")
+        .forEach(btn => {
+          btn.addEventListener("touchend", e => e.preventDefault(), { passive: false })
+        })
     })
   </script>
 </body>

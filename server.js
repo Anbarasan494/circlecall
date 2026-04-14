@@ -126,7 +126,6 @@ io.on("connection", socket => {
     socket.to(roomId).emit("user-connected", userId, user.username)
     broadcastParticipants(roomId)
   })
-
   // MEDIA STATE
   socket.on("media-state", (micOn, camOn) => {
     const { roomId, userId } = socket

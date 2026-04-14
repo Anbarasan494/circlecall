@@ -70,13 +70,22 @@
 /* ── Reset ─────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Remove tap highlight on all interactive elements */
+button, a, input, select, textarea {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* Prevents 300ms click delay on mobile */
+}
+
 body {
   font-family: var(--font-ui);
   background: var(--surface);
   color: var(--text);
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  /* Prevent bounce/overscroll on iOS */
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -572,7 +581,7 @@ body.room {
 }
 
 .meeting-container {
-  display: flex; height: 100vh; width: 100vw; overflow: hidden;
+  display: flex; height: 100dvh; width: 100vw; overflow: hidden;
 }
 
 /* ── Video area ─────────────────────────────────────────────────────────────── */
@@ -1101,88 +1110,558 @@ body.room .logo-wordmark {
 .ss-blank-sub { font-size: 12px; color: rgba(255,255,255,0.3); line-height: 1.7; }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   RESPONSIVE — mobile-first, two breakpoints
+   RESPONSIVE — mobile-first, comprehensive overhaul
+   Target: Google Meet / Zoom mobile UX feel
 ══════════════════════════════════════════════════════════════════════════════ */
 
-/* ── ≤700px: tablet / split window ── */
-@media (max-width: 700px) {
-  .meeting-container { flex-direction: column; }
+/* ── ≤768px: tablet / large phone landscape ── */
+@media (max-width: 768px) {
 
-  /* Video area takes remaining space above the side panel */
-  .video-area { flex: 1; min-height: 0; }
-
-  /* Side panel slides up from bottom */
-  .side-panel {
-    position: fixed; bottom: 0; left: 0; right: 0; width: 100%;
-    border-left: none; border-top: 2px solid rgba(14,165,233,0.3);
-    max-height: 55vh; z-index: 200;
-    border-radius: var(--r-lg) var(--r-lg) 0 0;
-    box-shadow: 0 -8px 40px rgba(0,0,0,0.5);
+  /* ── Body & Root layout ── */
+  body.room {
+    height: 100dvh;
+    /* Prevent iOS address bar from causing layout shifts */
+    position: fixed;
+    width: 100%;
   }
 
-  /* Controls: always centered, scroll horizontally if needed */
-  .controls {
-    gap: 5px; padding: 8px 6px;
-    padding-bottom: max(8px, env(safe-area-inset-bottom));
-    justify-content: center;
+  body.home {
+    height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    align-items: flex-start;
+    padding: 20px 0 40px;
   }
-  .ctrl-btn { min-width: 44px; padding: 8px 9px; }
 
-  /* Video grid: square tiles on mobile for better visibility */
+  /* Reduce heavy blur on mobile — performance */
+  .home-card,
+  .modal-overlay,
+  .modal-box,
+  .prejoin-box {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  /* Keep a lighter blur on critical dark overlays */
+  #toast { backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+
+  /* Reduce orb animations on mobile — save battery */
+  .orb { animation-duration: 60s !important; }
+
+  /* ── Meeting container ── */
+  .meeting-container {
+    flex-direction: column;
+    height: 100dvh;
+    position: relative;
+  }
+
+  /* ── Video area ── */
+  .video-area {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    /* Leave room for bottom controls bar */
+    padding-bottom: 0;
+  }
+
+  /* ── Top bar — slimmer on mobile ── */
+  .top-bar {
+    height: 48px;
+    padding: 0 12px;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .logo-icon.xs { display: none; }
+  .logo-wordmark.xs { display: none; }
+  .room-name-label { display: none !important; }
+  .call-timer { font-size: 11px; }
+
+  /* ── Video grid — mobile-first 1 column, fluid ── */
   #video-grid {
-    padding: 4px; gap: 4px;
+    padding: 4px;
+    gap: 4px;
     align-content: start;
+    align-items: start;
     grid-auto-rows: auto;
+    /* Allow scrolling in portrait when many participants */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* Full height minus top bar and controls */
+    flex: 1;
+    min-height: 0;
   }
-  /* Video wrappers default to 16/9; script.js overrides to 1/1 on mobile */
 
-  .home-card { width: 92vw; padding: 28px 20px; }
-  .modal-box { width: 92vw; padding: 30px 20px; }
+  /* Single participant: fill full grid height */
+  #video-grid .video-wrapper:only-child {
+    aspect-ratio: unset;
+    height: 100%;
+    width: 100%;
+  }
 
-  /* Screen share stacks vertically */
+  /* 2+ participants: 2-column grid */
+  #video-grid:not(:has(.video-wrapper:only-child)) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .video-wrapper {
+    aspect-ratio: 4/3;
+    width: 100%;
+    border-radius: 10px;
+  }
+
+  /* Pinned video: full width on mobile */
+  .video-wrapper.pinned {
+    grid-column: 1 / -1;
+    aspect-ratio: 16/9;
+  }
+
+  /* Avatar font responsive */
+  .tile-avatar {
+    font-size: clamp(18px, 8vw, 36px);
+  }
+
+  /* Name tag smaller */
+  .name-tag {
+    font-size: 10px;
+    padding: 2px 7px;
+    bottom: 5px;
+    left: 5px;
+  }
+
+  /* Status icons smaller */
+  .tile-status span {
+    width: 20px;
+    height: 20px;
+  }
+  .tile-status span svg { width: 11px; height: 11px; }
+
+  /* ── Controls — fixed bottom bar, thumb-friendly ── */
+  .controls {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    /* Safe area for iPhone notch/home indicator */
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    background: rgba(12, 13, 17, 0.97);
+    border-top: 1px solid rgba(14, 165, 233, 0.15);
+    backdrop-filter: none;
+    /* Prevent layout shift from positioning */
+    min-height: 64px;
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .controls::-webkit-scrollbar { display: none; }
+
+  /* Bigger touch targets for controls */
+  .ctrl-btn {
+    min-width: 48px;
+    min-height: 48px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    /* Remove hover effects on touch devices */
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .ctrl-btn:hover {
+    transform: none;
+    box-shadow: none;
+  }
+  .ctrl-btn:active {
+    transform: scale(0.95);
+  }
+
+  .ctrl-icon { width: 20px; height: 20px; }
+  .ctrl-icon svg { width: 20px; height: 20px; }
+
+  /* Leave button — more prominent on mobile */
+  .leave-btn {
+    min-width: 52px;
+    background: rgba(244, 63, 94, 0.15);
+    border-color: rgba(244, 63, 94, 0.4);
+  }
+
+  /* Ensure video area doesn't hide behind fixed controls */
+  .video-area {
+    padding-bottom: max(64px, calc(64px + env(safe-area-inset-bottom)));
+  }
+
+  /* ── Side panel — full-screen slide-up drawer ── */
+  .side-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    /* Full screen minus top bar */
+    max-height: 85dvh;
+    height: 85dvh;
+    border-left: none;
+    border-top: 2px solid rgba(14, 165, 233, 0.3);
+    border-radius: 20px 20px 0 0;
+    z-index: 200;
+    box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.65);
+    /* Slide up animation */
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    display: flex !important; /* Always mounted */
+    pointer-events: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  /* Drag handle indicator */
+  .side-panel::after {
+    content: "";
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 4px;
+    background: rgba(14, 165, 233, 0.3);
+    border-radius: 99px;
+    pointer-events: none;
+  }
+
+  .side-panel.open {
+    transform: translateY(0);
+    pointer-events: auto;
+    display: flex !important;
+  }
+
+  /* Panel needs a dim backdrop on mobile */
+  .side-panel.open::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: -1;
+    /* Don't trap clicks on the video area */
+    pointer-events: auto;
+  }
+
+  /* Panel views fill drawer height */
+  .panel-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Messages list scrollable */
+  #messages, #private-messages {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Participants list scrollable */
+  #participants-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Panel header — room for drag handle */
+  .panel-header {
+    padding-top: 18px;
+  }
+
+  /* Chat input stays above keyboard on iOS */
+  .chat-input-row {
+    position: sticky;
+    bottom: 0;
+    background: #fff;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  /* ── Home page — centered, full-width card ── */
+  .home-wrap {
+    width: 100%;
+    padding: 20px 16px;
+    gap: 20px;
+  }
+
+  .home-card {
+    width: 100%;
+    padding: 28px 20px;
+    border-radius: 18px;
+  }
+
+  .btn-new-meeting {
+    padding: 18px 24px;
+    font-size: 16px;
+    min-height: 56px;
+    border-radius: 14px;
+  }
+
+  .join-input {
+    padding: 15px 16px;
+    font-size: 16px; /* Prevent iOS auto-zoom on focus */
+  }
+
+  .btn-join {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+  }
+
+  /* ── Pre-join modal — full screen on mobile ── */
+  .modal-overlay {
+    align-items: flex-end;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .modal-box,
+  .prejoin-box {
+    width: 100%;
+    border-radius: 24px 24px 0 0;
+    padding: 28px 20px max(20px, env(safe-area-inset-bottom));
+    max-height: 92dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    animation: slideUpModal 0.35s cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+
+  @keyframes slideUpModal {
+    from { transform: translateY(60px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+
+  /* Drag handle on modal */
+  .modal-box::after,
+  .prejoin-box::after {
+    content: "";
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 4px;
+    background: rgba(14, 165, 233, 0.25);
+    border-radius: 99px;
+  }
+
+  .modal-input {
+    font-size: 16px; /* Prevent iOS auto-zoom */
+    padding: 15px 16px;
+  }
+
+  .btn-modal-join {
+    min-height: 54px;
+    font-size: 16px;
+    border-radius: 14px;
+  }
+
+  /* Preview video — maintain 16/9 */
+  .preview-wrap {
+    width: 100%;
+    max-height: 200px;
+  }
+
+  /* Preview controls — bigger buttons */
+  .preview-btn {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+  }
+  .preview-btn-icon svg { width: 22px; height: 22px; }
+
+  /* ── Screen share — stacked on mobile ── */
   #ss-wrap { flex-direction: column; }
   #ss-thumbs {
-    width: 100%; height: 110px; flex-direction: row;
-    border-right: none; border-bottom: 1px solid rgba(14,165,233,0.12);
+    width: 100%; height: 100px; flex-direction: row;
+    border-right: none; border-bottom: 1px solid rgba(14, 165, 233, 0.12);
     overflow-x: auto; overflow-y: hidden; padding: 5px 6px; gap: 5px;
+    -webkit-overflow-scrolling: touch;
   }
   .ss-thumb {
-    width: 90px !important; height: 90px !important;
+    width: 84px !important; height: 84px !important;
     aspect-ratio: unset !important; flex-shrink: 0 !important;
   }
   #ss-main { flex: 1; min-height: 0; }
 
-  /* Admit cards above controls */
-  #admit-container { top: auto; bottom: 90px; right: 8px; left: 8px; }
-  .admit-card { width: 100%; }
-
-  /* When panel is open, push controls up */
-  .meeting-container.panel-open .video-area {
-    padding-bottom: 55vh;
+  /* ── Admit cards — full-width on mobile ── */
+  #admit-container {
+    top: auto;
+    bottom: max(72px, calc(72px + env(safe-area-inset-bottom)));
+    right: 8px;
+    left: 8px;
   }
+  .admit-card { width: 100%; }
+  .admit-allow, .admit-deny {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  /* ── Action prompt ── */
+  .action-prompt {
+    bottom: max(74px, calc(74px + env(safe-area-inset-bottom)));
+    width: calc(100vw - 24px);
+    left: 12px;
+    transform: none;
+  }
+
+  /* ── Toast — above controls ── */
+  #toast {
+    bottom: max(76px, calc(76px + env(safe-area-inset-bottom)));
+  }
+
+  /* ── Waiting screen ── */
+  .waiting-box {
+    width: 90vw;
+    padding: 36px 28px;
+    border-radius: 20px;
+  }
+
+  /* ── Participant items — touch-friendly ── */
+  .participant-item {
+    padding: 12px 10px;
+  }
+  .icon-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .icon-btn svg { width: 16px; height: 16px; }
+
+  /* ── Notes area ── */
+  .notes-area {
+    font-size: 15px;
+    min-height: 200px;
+  }
+
+  /* ── Chat input ── */
+  .chat-input {
+    font-size: 16px; /* Prevent iOS auto-zoom */
+  }
+  .btn-send {
+    width: 44px;
+    height: 44px;
+  }
+  .emoji-toggle-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Reduce orb sizes on mobile */
+  .orb-1 { width: 300px; height: 300px; }
+  .orb-2 { width: 260px; height: 260px; }
+  .orb-3 { width: 200px; height: 200px; }
+  .orb-4 { width: 160px; height: 160px; }
+
+  /* Hide grid lines on mobile — performance */
+  .grid-lines { display: none; }
+
+  /* Room name chip display in waiting screen */
+  .nep-inner { width: 90vw; padding: 32px 24px; }
 }
 
-/* ── ≤480px: phone ── */
+/* ── ≤480px: small phone ── */
 @media (max-width: 480px) {
-  .top-bar { height: 44px; padding: 0 10px; gap: 6px; }
+
+  .top-bar {
+    height: 44px;
+    padding: 0 10px;
+    gap: 6px;
+  }
   .call-timer { font-size: 10px; }
-  .logo-wordmark.xs { display: none; }
   .host-badge { font-size: 10px; padding: 2px 7px; }
+  .room-pill { padding: 4px 8px 4px 8px; }
+  .room-pill-code { font-size: 10px; letter-spacing: 0.1em; }
 
-  .ctrl-btn { min-width: 40px; padding: 7px 7px; }
+  /* On small phones — 1 column for 1-2 people, 2 columns for 3+ */
+  #video-grid { grid-template-columns: 1fr; }
+  #video-grid:has(.video-wrapper:nth-child(3)) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .ctrl-btn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 9px 10px;
+  }
   .ctrl-icon { width: 18px; height: 18px; }
-  .ctrl-icon svg { width: 16px; height: 16px; }
+  .ctrl-icon svg { width: 18px; height: 18px; }
 
+  .side-panel { max-height: 90dvh; height: 90dvh; }
+
+  .home-card { padding: 22px 16px; border-radius: 16px; }
+  .home-tagline { font-size: 15px; }
+
+  #ss-thumbs { height: 80px; }
+  .ss-thumb { width: 70px !important; height: 70px !important; }
+
+  .chat-tab { font-size: 11px; padding: 9px 8px; }
+
+  .preview-wrap { max-height: 170px; }
+
+  /* Reduce grid gap to maximize video space */
   #video-grid { padding: 3px; gap: 3px; }
+  .video-wrapper { border-radius: 8px; }
+}
 
-  .side-panel { max-height: 60vh; }
-  .home-card { width: 96vw; padding: 22px 16px; }
-  .modal-box { width: 96vw; padding: 26px 16px; }
+/* ── Landscape phone — special case ── */
+@media (max-width: 768px) and (orientation: landscape) and (max-height: 500px) {
+  /* In landscape, side panel is a narrower drawer from the right */
+  .side-panel {
+    bottom: 0;
+    right: 0;
+    left: auto;
+    top: 0;
+    width: 320px;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    border-top: none;
+    border-left: 2px solid rgba(14, 165, 233, 0.3);
+    transform: translateX(100%);
+  }
+  .side-panel.open { transform: translateX(0); }
+  .side-panel::after { display: none; }
 
-  #ss-thumbs { height: 88px; }
-  .ss-thumb { width: 74px !important; height: 74px !important; }
+  /* Controls horizontal in landscape */
+  .controls {
+    padding: 6px 10px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    min-height: 54px;
+    gap: 6px;
+  }
+  .ctrl-btn {
+    min-height: 42px;
+    min-width: 42px;
+    padding: 8px 10px;
+  }
 
-  .chat-tab { font-size: 11px; padding: 8px 8px; }
+  /* Top bar — compact */
+  .top-bar { height: 40px; padding: 0 10px; }
+
+  /* Preview compact in landscape */
+  .modal-box, .prejoin-box {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-height: 100dvh;
+    border-radius: 0;
+    overflow-y: auto;
+  }
+  .preview-wrap { width: 45%; max-height: 180px; }
+
+  /* Video area leaves room for landscape controls */
+  .video-area {
+    padding-bottom: max(54px, calc(54px + env(safe-area-inset-bottom)));
+  }
 }
 
 /* Scrollbar global */
